@@ -1,109 +1,69 @@
-# main.py — Delta Ghost Backtesting + Replay
+# --- Next UI Integration Steps for Streamlit Backtesting + Replay System ---
 
 import streamlit as st
 import pandas as pd
-import plotly.graph_objs as go
-import openai
-from datetime import datetime
 import matplotlib.pyplot as plt
-import seaborn as sns
+import seaborn as sns  # Make sure seaborn is installed
+import plotly.graph_objects as go
 
-# --- Page Setup ---
-st.set_page_config(layout="wide")
-st.title("📊 Delta Ghost: Backtest & Replay + GPT/Claude Review")
+# -- Section 1: GPT/Claude Comparison Viewer UI --
+st.subheader("🧠 GPT + Claude Comparison Viewer")
 
-# --- File Upload ---
-uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
+col1, col2 = st.columns(2)
 
-# --- Claude Manual Output ---
-claude_output = st.text_area("Paste Claude Output Here for Comparison")
+with col1:
+    gpt_output = st.text_area("Paste GPT Output", height=200, key="gpt")
+with col2:
+    claude_output = st.text_area("Paste Claude Output", height=200, key="claude")
 
-# --- GPT API Setup ---
-openai.api_key = st.secrets.get("OPENAI_API_KEY")
+if gpt_output and claude_output:
+    st.markdown("#### 🔍 Differences & Insights")
+    if gpt_output.strip() == claude_output.strip():
+        st.success("Outputs are identical.")
+    else:
+        st.warning("Differences detected. Please review side by side.")
+    
+    # Optional: Compare sentence-by-sentence in the future
 
-# --- Real-time GPT Analysis ---
-gpt_result = None
-if st.button("Run GPT Summary") and uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    prompt = f"""
-You are a professional financial analyst. Review this 10-day candlestick data:
-{df.to_string(index=False)}
+# -- Section 2: Profit Heatmap & Cumulative P/L --
+st.subheader("📊 Profit Heatmap & Cumulative P/L")
 
-Summarize the price movement, identify key levels, and give a recommendation for next steps based on this pattern.
-"""
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a professional financial analyst."},
-                {"role": "user", "content": prompt},
-            ]
-        )
-        gpt_result = response['choices'][0]['message']['content']
-    except Exception as e:
-        st.error(f"GPT API error: {e}")
+# Simulated results for visual testing
+@st.cache_data
+def generate_dummy_results():
+    dates = pd.date_range(start='2025-06-01', periods=20)
+    profits = [round((i % 5 - 2) * 5 + 10 * (i % 3), 2) for i in range(20)]
+    return pd.DataFrame({"Date": dates, "Profit": profits})
 
-# --- Data Display and Replay ---
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    df['Date'] = pd.to_datetime(df['Date'])
+results_df = generate_dummy_results()
 
-    st.subheader("📈 Candlestick Chart")
-    fig = go.Figure(data=[
-        go.Candlestick(
-            x=df['Date'],
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            name='Candlesticks')
-    ])
-    st.plotly_chart(fig, use_container_width=True)
+# Profit Heatmap (Seaborn)
+st.markdown("**Profit Heatmap (by Day)**")
+heatmap_df = results_df.copy()
+heatmap_df['Day'] = heatmap_df['Date'].dt.day
+heatmap_df['Week'] = heatmap_df['Date'].dt.isocalendar().week
+heatmap_data = heatmap_df.pivot(index="Week", columns="Day", values="Profit")
 
-    st.subheader("🔁 Strategy Replay: Step Through Candles")
-    start = st.slider("Select starting index", 0, len(df)-2, 0)
-    next_day = start + 1 if start + 1 < len(df) else len(df)-1
-    replay_df = df.iloc[:next_day+1]
+fig, ax = plt.subplots(figsize=(10, 4))
+sns.heatmap(heatmap_data, annot=True, cmap="RdYlGn", fmt=".1f", linewidths=0.5, ax=ax)
+st.pyplot(fig)
 
-    fig_replay = go.Figure(data=[
-        go.Candlestick(
-            x=replay_df['Date'],
-            open=replay_df['Open'],
-            high=replay_df['High'],
-            low=replay_df['Low'],
-            close=replay_df['Close'],
-            name='Replay')
-    ])
-    st.plotly_chart(fig_replay, use_container_width=True)
+# Cumulative Profit Line Chart (Plotly)
+st.markdown("**Cumulative Profit**")
+results_df['Cumulative'] = results_df['Profit'].cumsum()
+fig2 = go.Figure()
+fig2.add_trace(go.Scatter(x=results_df['Date'], y=results_df['Cumulative'], mode='lines+markers', name='Cumulative P/L'))
+fig2.update_layout(title='Cumulative Profit Over Time', xaxis_title='Date', yaxis_title='Total P/L ($)')
+st.plotly_chart(fig2)
 
-    # --- P&L Heatmap ---
-    st.subheader("📊 Profit Heatmap + Cumulative P&L")
-    df['Daily Return'] = df['Close'].pct_change().fillna(0)
-    df['Cumulative P&L'] = (1 + df['Daily Return']).cumprod()
+# -- Section 3: GPT Summarization API Integration (Optional Toggle) --
+st.subheader("🤖 GPT Summary Report")
 
-    fig_pl = go.Figure()
-    fig_pl.add_trace(go.Scatter(x=df['Date'], y=df['Cumulative P&L'], mode='lines+markers', name='Cumulative P&L'))
-    fig_pl.update_layout(title="Cumulative Return Over Time", xaxis_title="Date", yaxis_title="Return")
-    st.plotly_chart(fig_pl, use_container_width=True)
-
-    # --- Heatmap Visual ---
-    st.write("Heatmap of Daily Returns")
-    heat_df = df.pivot_table(values='Daily Return', columns=df['Date'].dt.strftime('%Y-%m-%d'), aggfunc='sum')
-    plt.figure(figsize=(12, 1))
-    sns.heatmap(heat_df, cmap='RdYlGn', annot=True, fmt=".2%")
-    st.pyplot(plt.gcf())
-
-    # --- GPT vs Claude Side-by-Side ---
-    st.subheader("🧠 GPT vs Claude Comparison")
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("**Claude Summary (Manual Paste)**")
-        st.text_area("Claude Result", claude_output, height=300)
-
-    with col2:
-        st.markdown("**GPT Live Summary**")
-        st.write(gpt_result if gpt_result else "Click 'Run GPT Summary' to generate")
-
-else:
-    st.info("Please upload a CSV file to start the backtest and replay.")
+if st.toggle("Enable Real-Time GPT Summarization"):
+    summary_prompt = st.text_area("Enter prompt for GPT", value="Summarize the backtest results above in simple terms")
+    if st.button("Submit to GPT"):
+        with st.spinner("Sending to GPT..."):
+            # Placeholder for actual GPT API call
+            summary_result = "This is a placeholder summary returned by the GPT API based on your input."
+            st.success("Summary received:")
+            st.write(summary_result)
