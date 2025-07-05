@@ -1,75 +1,81 @@
-
 import streamlit as st
 import pandas as pd
-import openai
+import os
+from openai import OpenAI
 from docx import Document
-import base64
 
-# --- Page Config ---
-st.set_page_config(page_title="Claude vs GPT Summary Comparison", layout="wide")
+# Load OpenAI API key from environment
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# --- API Key Setup ---
-openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
+st.set_page_config(page_title="Strategy Replay Mode + GPT Summary", layout="wide")
+st.title("📘 Strategy Replay Mode + Batch Backtest Loop")
 
-# --- Helper: Read Claude File ---
-def read_uploaded_file(file):
-    if file.name.endswith(".txt"):
-        return file.read().decode("utf-8")
-    elif file.name.endswith(".docx"):
-        doc = Document(file)
-        return "\n".join([para.text for para in doc.paragraphs])
+# File Upload
+st.subheader("📅 Upload Historical Price Data (CSV)")
+price_file = st.file_uploader("Upload your historical CSV", type="csv")
+if price_file:
+    df = pd.read_csv(price_file)
+    if 'Date' in df.columns:
+        df['Date'] = pd.to_datetime(df['Date'])
+        st.success("CSV uploaded successfully.")
+        st.dataframe(df.head())
     else:
-        return "Unsupported file type."
+        st.error("Missing 'Date' column in CSV.")
 
-# --- Claude vs GPT Comparison UI ---
-st.title("🤖 Claude vs GPT Summary Comparison")
-st.markdown("Upload your Claude-generated summary and compare it with a GPT-4 summary in real-time.")
+st.subheader("📑 Upload Trade History (CSV)")
+trade_file = st.file_uploader("Upload your trades CSV", type="csv", key="trades")
+if trade_file:
+    trades = pd.read_csv(trade_file)
+    st.success("Trade CSV uploaded.")
+    st.dataframe(trades.head())
 
-col1, col2 = st.columns(2)
+# Run Summary Comparison
+st.subheader("🧠 Generate GPT-4 Summary")
+input_text = st.text_area("Paste input for GPT-4 summary (e.g. trade batch details)", height=180)
 
-with col1:
-    st.subheader("📥 Upload Claude Summary (.txt or .docx)")
-    uploaded_file = st.file_uploader("Choose a file", type=["txt", "docx"], key="claude_file")
-    claude_text = ""
-    if uploaded_file:
-        claude_text = read_uploaded_file(uploaded_file)
-        st.text_area("Claude Summary Content", value=claude_text, height=300)
-
-with col2:
-    st.subheader("✍️ Generate GPT-4 Summary")
-    gpt_input = st.text_area("Paste input for GPT-4 summary (e.g. trade batch details)", height=300)
-    if st.button("Run GPT-4 Summary"):
-        if gpt_input and openai.api_key:
-            try:
-                response = openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": "You are a professional financial analyst. Summarize this batch of trade results clearly."},
-                        {"role": "user", "content": gpt_input}
-                    ]
-                )
-                gpt_output = response['choices'][0]['message']['content']
-                st.text_area("GPT-4 Summary Output", value=gpt_output, height=300)
-            except Exception as e:
-                st.error(f"Error generating GPT summary: {e}")
-        else:
-            st.warning("Please provide GPT input and ensure API key is set.")
-
-# --- Comparison Side-by-Side ---
-if claude_text and gpt_input:
-    st.markdown("### 🧠 Claude vs GPT Side-by-Side Comparison")
-    col1, col2 = st.columns(2)
-    col1.markdown("#### Claude Summary")
-    col1.write(claude_text)
-    col2.markdown("#### GPT-4 Summary")
+if st.button("Run GPT-4 Summary"):
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a financial analyst. Summarize this text:"},
-                {"role": "user", "content": gpt_input}
-            ]
-        )
-        col2.write(response['choices'][0]['message']['content'])
+        with st.spinner("Summarizing with GPT-4..."):
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a professional financial analyst. Provide a clear, expert-level evaluation of the following trade data."},
+                    {"role": "user", "content": input_text}
+                ]
+            )
+            gpt_summary = response.choices[0].message.content
+            st.markdown("### 🤖 GPT-4 Summary")
+            st.write(gpt_summary)
+
+            # Save to DOCX
+            doc = Document()
+            doc.add_heading("GPT-4 Summary", 0)
+            doc.add_paragraph(gpt_summary)
+            doc_path = "gpt_summary.docx"
+            doc.save(doc_path)
+            with open(doc_path, "rb") as file:
+                st.download_button("📥 Download GPT Summary (.docx)", file, file_name=doc_path)
+
     except Exception as e:
-        col2.error(f"Error displaying GPT summary: {e}")
+        st.error(f"Error generating GPT summary: {str(e)}")
+
+# Claude summary input (manual)
+st.subheader("📝 Claude Summary (Paste)")
+claude_summary = st.text_area("Paste Claude Summary", height=150)
+
+# Side-by-side comparison
+if input_text and claude_summary:
+    st.subheader("📊 Claude vs GPT Summary Comparison")
+    with st.expander("📋 Summary Comparison"):
+        st.markdown("#### Claude Summary:")
+        st.markdown(claude_summary)
+
+        if 'gpt_summary' in locals():
+            st.markdown("#### GPT Summary:")
+            st.markdown(gpt_summary)
+
+            st.markdown("#### 📌 Verdict:")
+            st.success("✅ Both GPT and Claude provided insight. Use this comparison for strategy refinement or case study archiving.")
+
+# Instruction
+st.info("👉 Upload both historical price CSV and trade CSV to begin full backtest. Use GPT and Claude summaries to archive insights or identify future entry conditions.")
