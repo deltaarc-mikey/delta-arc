@@ -2,93 +2,119 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from io import StringIO
+import openai
+from datetime import datetime
 
-st.set_page_config(page_title="Strategy Replay Mode + Batch Backtest Loop", layout="wide")
+# Set your GPT-4 API key here or use environment variable
+openai.api_key = st.secrets["openai_api_key"] if "openai_api_key" in st.secrets else "YOUR_API_KEY_HERE"
+
 st.title("📘 Strategy Replay Mode + Batch Backtest Loop")
 
-# Upload CSV
-st.subheader("📤 Upload Historical Price Data (CSV)")
-st.caption("Upload a CSV with columns: Date, Open, High, Low, Close, Volume")
-uploaded_file = st.file_uploader("Upload your historical CSV", type=["csv"])
+# Upload historical data CSV
+st.subheader("📥 Upload Historical Price Data (CSV)")
+price_csv = st.file_uploader("Upload your historical CSV", type=["csv"])
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    df['Date'] = pd.to_datetime(df['Date'])
-    df.set_index('Date', inplace=True)
-    st.success("CSV uploaded successfully.")
-    st.write(df.head())
-    st.line_chart(df['Close'])
+if price_csv:
+    df = pd.read_csv(price_csv)
+    if 'Date' not in df.columns:
+        st.error("CSV must contain a 'Date' column.")
+    else:
+        df['Date'] = pd.to_datetime(df['Date'])
+        st.success("CSV uploaded successfully.")
+        st.dataframe(df.head())
 
-    st.download_button("📥 Download AAPL_Test_Historical.csv", uploaded_file, file_name="AAPL_Test_Historical.csv")
+# Upload trade backtest CSV
+st.sidebar.header("📤 Upload Trade CSV")
+trade_csv = st.sidebar.file_uploader("Upload your trades file", type=["csv"])
+start_date = st.sidebar.date_input("Start Date", datetime(2024, 1, 1))
+end_date = st.sidebar.date_input("End Date", datetime(2025, 7, 5))
 
-# Batch Backtest
-st.subheader("🔄 Batch Multi-Trade Backtest Loop")
-trade_input = st.text_area("Paste trades (comma-separated values: entry_date, exit_date, target_gain %)",
-"""2025-06-05,2025-06-12,5
-2025-06-13,2025-06-20,8
-2025-06-21,2025-07-01,12""")
+results = []
 
-if st.button("Run Batch Backtest"):
-    trades = []
-    for i, line in enumerate(trade_input.strip().split('\n')):
-        parts = line.strip().split(',')
-        if len(parts) == 3:
-            try:
-                entry_date = pd.to_datetime(parts[0])
-                exit_date = pd.to_datetime(parts[1])
-                target = float(parts[2])
-                entry_price = df.loc[entry_date]['Close']
-                exit_price = df.loc[exit_date]['Close']
-                return_pct = (exit_price - entry_price) / entry_price * 100
-                target_hit = return_pct >= target
-                trades.append({
-                    "Trade": i,
-                    "Entry Date": entry_date.date(),
-                    "Exit Date": exit_date.date(),
-                    "Target %": target,
-                    "Entry Price": entry_price,
-                    "Exit Price": exit_price,
-                    "Return %": round(return_pct, 2),
-                    "Target Hit": "✅ Yes" if target_hit else "❌ No"
-                })
-            except Exception as e:
-                st.warning(f"⚠️ Error on row {i + 1}: {str(e)}")
-    if trades:
-        zresults = pd.DataFrame(trades)
+if trade_csv and price_csv:
+    trades_df = pd.read_csv(trade_csv)
+
+    st.subheader("📊 Batch Backtest")
+    st.dataframe(trades_df)
+
+    for i, row in trades_df.iterrows():
+        try:
+            entry_date = pd.to_datetime(row['entry_date'])
+            exit_date = pd.to_datetime(row['exit_date'])
+            target_gain = float(row['target_gain'])
+
+            entry_row = df[df['Date'] == entry_date]
+            exit_row = df[df['Date'] == exit_date]
+
+            if entry_row.empty or exit_row.empty:
+                st.warning(f"⚠️ Error on row {i+1}: invalid entry or exit date")
+                continue
+
+            entry_price = entry_row['Close'].values[0]
+            exit_price = exit_row['Close'].values[0]
+            return_pct = ((exit_price - entry_price) / entry_price) * 100
+            target_hit = return_pct >= target_gain
+
+            results.append({
+                'Trade': i,
+                'Entry Date': entry_date.date(),
+                'Exit Date': exit_date.date(),
+                'Target %': target_gain,
+                'Entry Price': round(entry_price, 2),
+                'Exit Price': round(exit_price, 2),
+                'Return %': round(return_pct, 2),
+                'Target Hit': "✅ Yes" if target_hit else "❌ No"
+            })
+
+        except Exception as e:
+            st.error(f"Error processing row {i+1}: {e}")
+
+    if results:
+        zresults = pd.DataFrame(results)
         st.success("✅ Backtest complete!")
         st.dataframe(zresults)
-        st.download_button("📥 Download Backtest Results", zresults.to_csv(index=False), file_name="backtest_results.csv")
 
-        # Heatmap
+        # 📈 Profit Heatmap
         st.subheader("📉 Profit Heatmap")
         try:
-            fig, ax = plt.subplots(figsize=(8, 3))
-            sns.heatmap(zresults[['Return %']].T, cmap="RdYlGn", annot=True, fmt=".2f", cbar=False, ax=ax)
+            fig, ax = plt.subplots()
+            sns.heatmap(zresults[['Return %']], annot=True, cmap='coolwarm', ax=ax)
             st.pyplot(fig)
-        except Exception as e:
-            st.error(f"Heatmap error: {str(e)}")
+        except KeyError:
+            st.error("Error: Could not render heatmap. Check 'Return %' column.")
 
-        # Cumulative P/L
+        # 📈 Cumulative P/L chart
         st.subheader("📈 Cumulative P/L")
-        zresults['Cum P/L'] = zresults['Return %'].cumsum()
-        fig2, ax2 = plt.subplots()
-        ax2.plot(zresults['Exit Date'], zresults['Cum P/L'], marker='o')
-        ax2.set_ylabel("Cumulative % Return")
-        ax2.set_title("Portfolio Growth Over Time")
-        st.pyplot(fig2)
+        try:
+            zresults['Cumulative P/L'] = zresults['Return %'].cumsum()
+            fig2, ax2 = plt.subplots()
+            zresults.plot(x='Trade', y='Cumulative P/L', ax=ax2, marker='o')
+            st.pyplot(fig2)
+        except Exception as e:
+            st.error(f"Cumulative chart error: {e}")
 
-# Strategy Replay Mode Placeholder
-st.subheader("⏪ Strategy Replay Mode (Coming Soon)")
-st.info("Strategy Replay will allow you to simulate alerts + actions step-by-step using historical data.")
+        # 🤖 GPT Summarization
+        st.subheader("🤖 GPT-4 Summarization (Trade Insights)")
 
-# Claude/GPT Prompt Section
-st.subheader("🧠 Claude LLM Prompt")
-st.code("""
-You are an AI trading analyst. Review the historical price data between 2025-06-05 and 2025-07-02.
-Assume an entry on the first day and an exit on the last day. Report:
-- Entry price, Exit price
-- Percentage return
-- If a gain of 15% was achieved at any point
-- Simple technical notes (trend, price behavior)
-""", language="markdown")
+        summarize_all = "".join([
+            f"Trade {r['Trade']}: Entry {r['Entry Date']}, Exit {r['Exit Date']}, Target {r['Target %']}%, Return {r['Return %']}% -> {r['Target Hit']}\n"
+            for r in results
+        ])
+
+        if st.button("Summarize All Trades with GPT-4"):
+            with st.spinner("Calling GPT-4..."):
+                try:
+                    response = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": "You are an AI financial analyst. Summarize the trading performance."},
+                            {"role": "user", "content": summarize_all}
+                        ]
+                    )
+                    st.success("Response from GPT-4:")
+                    st.markdown(response['choices'][0]['message']['content'])
+                except Exception as e:
+                    st.error(f"OpenAI Error: {e}")
+
+else:
+    st.info("Please upload both historical price CSV and trade CSV to begin.")
