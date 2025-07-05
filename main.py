@@ -37,9 +37,7 @@ if run_gpt and gpt_input:
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a professional options trader."},
-                {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone:\n{user_input}"},
-
-{gpt_input}"}
+                {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone:\n{gpt_input}"},
             ]
         )
         gpt_summary = response.choices[0].message.content
