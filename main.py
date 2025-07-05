@@ -47,14 +47,24 @@ if run_gpt and gpt_input:
         st.error(f"❌ GPT-4 summary generation failed: {e}")
 
 # --- Claude Summary (Manual Input) ---
-st.subheader("📝 Claude Summary (Paste)")
-claude_input = st.text_area("Paste Claude Summary", height=150)
-st.session_state.claude_summary = claude_input
+with st.expander("📝 Claude Summary (Paste)"):
+    claude_input = st.text_area("Paste Claude Summary", height=150)
+    run_claude = st.button("Run Claude Summary")
 
-# --- Claude Tone/Intent Tagging ---
-if claude_input:
-    tone = "Positive" if any(word in claude_input.lower() for word in ["good", "strong", "confirmed", "alignment", "profitable"]) else "Neutral or Cautious"
-    st.markdown(f"🧭 **Claude Tone Detected**: `{tone}`")
+    if run_claude and claude_input:
+        # Claude tone/intent tagging
+        with st.spinner("Analyzing Claude Summary..."):
+            if any(word in claude_input.lower() for word in ["excellent", "perfect", "strong", "great", "high confidence"]):
+                tone = "✅ Positive"
+            elif any(word in claude_input.lower() for word in ["cautious", "decent", "mixed", "partial", "risk"]):
+                tone = "⚠️ Neutral / Cautious"
+            elif any(word in claude_input.lower() for word in ["bad", "avoid", "weak", "fail", "hype", "undisciplined", "loss"]):
+                tone = "❌ Negative"
+            else:
+                tone = "🤔 Unknown"
+
+            st.success(f"Claude Summary Tone: **{tone}**")
+            st.info("Claude Summary stored and tagged. Use comparison box below to finalize GPT vs Claude review.")
 
 # --- GPT vs Claude Comparison ---
 if st.session_state.gpt_summary and st.session_state.claude_summary:
