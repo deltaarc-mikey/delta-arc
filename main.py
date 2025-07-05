@@ -53,13 +53,25 @@ if run:
             visualize_trade(data, entry_date, exit_date)
 
             st.subheader(f"📌 {ticker.upper()} Trade Summary")
-            if backtest_type == "Basic Price":
-                st.success(f"Entry: ${entry_price:.2f}, Exit: ${exit_price:.2f}, Gain: {gain:.2f}%")
-            else:
-                if gain >= gain_target:
-                    st.success(f"Target reached ✅ — Gain: {gain:.2f}% (Target: {gain_target}%)")
-                else:
-                    st.warning(f"Target not met ❌ — Gain: {gain:.2f}% (Target: {gain_target}%)")
+            if backtest_type == "% Gain Target":
+    # Calculate percentage change daily from entry
+    subset = data.loc[entry_date:exit_date]
+    entry_price = float(subset.iloc[0]['Close'])
+    target_price = entry_price * (1 + gain_target / 100)
+
+    target_hit_date = None
+    for date, row in subset.iterrows():
+        if row['Close'] >= target_price:
+            target_hit_date = date
+            break
+
+    if target_hit_date:
+        result_str = f"🎯 Target hit on {target_hit_date.date()} — Price: ${row['Close']:.2f} — Gain: {(row['Close'] - entry_price)/entry_price*100:.2f}%"
+        st.success(result_str)
+        visualize_trade(data, entry_date, str(target_hit_date.date()))
+    else:
+        st.warning(f"❌ Target not hit between {entry_date} and {exit_date}.")
+        visualize_trade(data, entry_date, exit_date)
 
     except Exception as e:
         st.error(f"Error during backtest: {e}")
