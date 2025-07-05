@@ -62,7 +62,7 @@ def run_full_analysis(ticker_symbol):
 st.title("🤖 AI Financial Analyst")
 
 if 'agent_executor' not in st.session_state:
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=st.secrets["AIzaSyD36WDfJR3lL7yLsKPa7JLHpQxpSaUx5Uk"])
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=st.secrets["secret"])
     tools = [
         Tool(name="run_full_analysis", func=run_full_analysis, description="Use when the user asks for a 'full analysis', 'summary', or 'overview'. Gathers all info."),
         Tool(name="get_stock_data", func=get_stock_data, description="Use for recent stock market PRICE and VOLUME data."),
