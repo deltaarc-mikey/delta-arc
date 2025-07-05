@@ -1,5 +1,7 @@
 import streamlit as st
 import yfinance as yf
+data = yf.download("MSFT", start="2024-11-15", end="2024-12-15")
+print(data.head())
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
