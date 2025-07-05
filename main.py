@@ -1,82 +1,99 @@
 import streamlit as st
 import pandas as pd
+import io
 import matplotlib.pyplot as plt
-import time
 
-st.set_page_config(layout="wide")
-st.title("📉 Strategy Replay Mode + Batch Backtest Loop")
+st.set_page_config(page_title="Strategy Replay Mode + Batch Backtest", layout="wide")
 
-# Load base chart data
-csv_file_path = "AAPL_Strategy_Replay_Enhanced.csv"
+st.title("📘 Strategy Replay Mode + Batch Backtest Loop")
+
+# Upload CSV file
+st.subheader("📤 Upload Historical Price Data (CSV)")
+file = st.file_uploader("Upload a CSV with columns: Date, Open, High, Low, Close, Volume", type=["csv"])
+
 if file is not None:
     df = pd.read_csv(file, parse_dates=["Date"])
     df["Date"] = pd.to_datetime(df["Date"])
+    df = df.sort_values("Date")
+    st.success("CSV uploaded successfully.")
+    st.write(df.head())
+
+    # Display basic chart
+    st.line_chart(df.set_index("Date")["Close"])
+
+    st.divider()
+
+    # Batch backtest logic
+    st.subheader("🌀 Batch Multi-Trade Backtest Loop")
+
+    st.info("Each row below represents a trade setup: Entry Date, Exit Date, Target Gain %")
+
+    batch_data = st.text_area(
+        "Paste trades (comma-separated values: entry_date, exit_date, target_gain)",
+        value="2025-06-05,2025-06-12,5\n2025-06-13,2025-06-20,8\n2025-06-21,2025-07-01,12"
+    )
+
+    if st.button("▶️ Run Batch Backtest"):
+        batch_results = []
+        lines = batch_data.strip().split("\n")
+        for i, line in enumerate(lines):
+            try:
+                entry_str, exit_str, target_str = line.split(",")
+                entry = pd.to_datetime(entry_str.strip())
+                exit = pd.to_datetime(exit_str.strip())
+                target = float(target_str.strip())
+
+                trade_df = df[(df["Date"] >= entry) & (df["Date"] <= exit)]
+
+                if trade_df.empty:
+                    result = {"Trade": i+1, "Error": "No data in date range"}
+                else:
+                    entry_price = trade_df.iloc[0]["Close"]
+                    exit_price = trade_df.iloc[-1]["Close"]
+                    percent_return = ((exit_price - entry_price) / entry_price) * 100
+                    hit_target = any(
+                        ((row["High"] - entry_price) / entry_price) * 100 >= target
+                        for _, row in trade_df.iterrows()
+                    )
+                    result = {
+                        "Trade": i+1,
+                        "Entry Date": entry_str,
+                        "Exit Date": exit_str,
+                        "Target %": target,
+                        "Entry Price": round(entry_price, 2),
+                        "Exit Price": round(exit_price, 2),
+                        "Return %": round(percent_return, 2),
+                        "Target Hit": "✅ Yes" if hit_target else "❌ No"
+                    }
+                batch_results.append(result)
+            except Exception as e:
+                batch_results.append({"Trade": i+1, "Error": str(e)})
+
+        result_df = pd.DataFrame(batch_results)
+        st.dataframe(result_df)
+
+        csv = result_df.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Download Backtest Results", csv, "batch_backtest_results.csv", "text/csv")
+
+    st.divider()
+
+    # Strategy Replay Mode (stub)
+    st.subheader("⏪ Strategy Replay Mode (Coming Soon)")
+    st.info("🔄 Strategy Replay will allow you to simulate alerts + actions step-by-step using historical data.")
+
+    st.divider()
+
+    # Claude prompt
+    st.subheader("🧠 Claude LLM Prompt")
+
+    claude_prompt = f"""You are an AI trading analyst. Review the historical price data between {df['Date'].min().strftime('%Y-%m-%d')} and {df['Date'].max().strftime('%Y-%m-%d')}. 
+Assume an entry on the first day and an exit on the last day. Report:
+- Entry price, Exit price
+- Percentage return
+- If a gain of 15% was achieved at any point
+- Simple technical notes (trend, price behavior)"""
+
+    st.code(claude_prompt, language="markdown")
+
 else:
-    st.warning("Please upload a CSV file to proceed.")
-    st.stop()
-df.set_index("Date", inplace=True)
-
-# Sidebar: Strategy Replay Controls
-st.sidebar.header("🕹️ Strategy Replay")
-replay_mode = st.sidebar.radio("Replay Mode", ["Manual Step", "Auto Play"])
-start_index = st.sidebar.slider("Start from row", 0, len(df)-1, 0)
-replay_speed = st.sidebar.slider("Speed (sec)", 0.1, 2.0, 0.5)
-
-# Sidebar: Batch Backtest Upload
-st.sidebar.header("📄 Upload Batch Backtest File")
-batch_file = st.sidebar.file_uploader("Upload CSV with Trade Signals", type=["csv"])
-
-# --- Strategy Replay UI ---
-st.subheader("🔁 Strategy Replay Mode")
-
-if replay_mode == "Manual Step":
-    step = st.number_input("Step forward by N rows", min_value=1, value=5)
-    if st.button("Step"):
-        preview_df = df.iloc[start_index:start_index+step]
-        st.line_chart(preview_df["Close"])
-elif replay_mode == "Auto Play":
-    auto_length = st.number_input("Replay N steps", 10, 100, 20)
-    if st.button("Play"):
-        for i in range(start_index, min(start_index + auto_length, len(df))):
-            st.line_chart(df.iloc[start_index:i]["Close"])
-            time.sleep(replay_speed)
-
-# --- Batch Backtest UI ---
-st.subheader("📊 Batch Backtest Results")
-
-if batch_file:
-    try:
-        batch_df = pd.read_csv(batch_file)
-        st.write("✅ Uploaded Trades")
-        st.dataframe(batch_df)
-
-        # Backtest processing
-        results = []
-        for _, row in batch_df.iterrows():
-            ticker = row['ticker']
-            entry_date = pd.to_datetime(row['entry_date'])
-            exit_date = pd.to_datetime(row['exit_date'])
-
-            if entry_date in df.index and exit_date in df.index:
-                entry = df.loc[entry_date]['Close']
-                exit = df.loc[exit_date]['Close']
-                pnl = round((exit - entry) / entry * 100, 2)
-                results.append({
-                    "ticker": ticker,
-                    "entry_date": entry_date,
-                    "exit_date": exit_date,
-                    "entry_price": entry,
-                    "exit_price": exit,
-                    "PnL (%)": pnl
-                })
-
-        if results:
-            result_df = pd.DataFrame(results)
-            st.success("✅ Backtest Complete")
-            st.dataframe(result_df)
-            st.line_chart(result_df["PnL (%)"])
-        else:
-            st.warning("No valid trades found in date range.")
-
-    except Exception as e:
-        st.error(f"❌ Error in backtest: {e}")
+    st.warning("Upload a valid CSV file to begin.")
