@@ -7,3 +7,6 @@ openai
 seaborn
 python-docx
 textblob
+google-api-python-client
+pytrends
+Pillow
