@@ -1,120 +1,117 @@
+
 import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-import openai
-from datetime import datetime
 from textblob import TextBlob
+import openai
+import os
+import requests
 
-# ----- CONFIG -----
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+st.set_page_config(page_title="Delta Ghost: AI Trade Engine", layout="wide")
 
-# ----- PAGE CONFIG -----
-st.set_page_config(layout="wide", page_title="Delta Ghost LLM Consensus Engine")
-st.title("🔺 Delta Ghost: AI Trade Consensus Dashboard")
+# Set OpenAI API Key
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ----- FILE UPLOAD -----
-st.sidebar.header("📤 Upload Trade CSV")
-uploaded_file = st.sidebar.file_uploader("Upload trade data CSV", type="csv")
+# Sidebar navigation
+st.sidebar.title("📊 Delta Ghost Control Panel")
+tabs = ["📈 Trade Generator", "📡 Trend Scanner", "📘 Strategy Replay", "🧠 Verdict Hub"]
+page = st.sidebar.radio("Navigate", tabs)
 
-# ----- GEMINI INPUT -----
-st.sidebar.header("🧠 Gemini Input Panel")
-gemini_input = st.sidebar.text_area("Enter Gemini analysis or paste prompt:")
+# --- GPT Summary Generator ---
+def generate_gpt_summary(gpt_input):
+    try:
+        messages = [
+            {"role": "system", "content": "You are a financial analyst specializing in options trading."},
+            {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone:\n{gpt_input}"}
+        ]
+        response = openai.ChatCompletion.create(model="gpt-4", messages=messages)
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error: {e}"
 
-# ----- CLAUDE INPUT -----
-st.sidebar.header("🧠 Claude Summary Input")
-claude_input = st.sidebar.text_area("Paste Claude summary here:")
+# --- Claude Summary Tone Detector ---
+def detect_tone(text):
+    blob = TextBlob(text)
+    polarity = blob.sentiment.polarity
+    if polarity > 0.1:
+        return "Positive"
+    elif polarity < -0.1:
+        return "Negative"
+    else:
+        return "Neutral"
 
-# ----- GPT PROMPT -----
-st.sidebar.header("🤖 GPT Trade Summary Generator")
-gpt_input = st.sidebar.text_area("Enter trade setup or thesis:")
-run_gpt = st.sidebar.button("Generate GPT Summary")
+# --- Gemini Mock Sentiment Fuser (Replace with real logic/API as needed) ---
+def gemini_sentiment_fusion(ticker):
+    import random
+    score = random.randint(40, 90)
+    source = random.choice(["Reddit Buzz", "Google Trend", "Both"])
+    return f"{score} ({source})"
 
-# ----- GPT OUTPUT -----
-gpt_summary, gpt_score, gpt_tone = "", 0, ""
-if run_gpt and gpt_input:
-    with st.spinner("Asking GPT-4..."):
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a professional options trader."},
-                {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone:\n{gpt_input}"},
-            ]
-        )
-        gpt_summary = response.choices[0].message.content
-        blob = TextBlob(gpt_summary)
-        gpt_score = min(100, max(0, int(blob.sentiment.polarity * 100)))
-        gpt_tone = "Positive" if blob.sentiment.polarity > 0.2 else "Neutral" if blob.sentiment.polarity > -0.1 else "Negative"
+# --- Strategy Replay GPT Summary ---
+def simulate_trade_summary(trade_notes):
+    return generate_gpt_summary(trade_notes)
 
-# ----- CLAUDE TONE -----
-claude_tone = ""
-if claude_input:
-    blob = TextBlob(claude_input)
-    claude_tone = "Positive" if blob.sentiment.polarity > 0.2 else "Neutral" if blob.sentiment.polarity > -0.1 else "Negative"
+# --- Verdict Comparator ---
+def verdict(gpt_summary, claude_summary):
+    gpt_tone = detect_tone(gpt_summary)
+    claude_tone = detect_tone(claude_summary)
+    aligned = gpt_tone == claude_tone
+    return aligned, gpt_tone, claude_tone
 
-# ----- DISPLAY -----
-st.subheader("🧠 LLM Trade Comparison")
-cols = st.columns(3)
-with cols[0]:
-    st.markdown("#### 🤖 GPT Summary")
-    st.write(gpt_summary)
-    st.metric("Confidence", f"{gpt_score}%")
-    st.metric("Tone", gpt_tone)
+# --- Layouts ---
+if page == "📈 Trade Generator":
+    st.title("📈 AI-Powered Trade Generator")
 
-with cols[1]:
-    st.markdown("#### 🧠 Claude Summary")
-    st.write(claude_input)
-    st.metric("Tone", claude_tone)
+    gpt_input = st.text_area("📥 Paste your trade idea / batch", height=200)
+    if st.button("🧠 Generate GPT-4 Summary"):
+        gpt_summary = generate_gpt_summary(gpt_input)
+        st.subheader("🧠 GPT-4 Summary")
+        st.write(gpt_summary)
 
-with cols[2]:
-    st.markdown("#### 🔮 Gemini Input")
-    st.write(gemini_input)
-    # Gemini summary box (placeholder)
-    st.info("Gemini response currently handled outside app. Paste below once retrieved.")
-    gemini_out = st.text_area("Paste Gemini output here")
-    if gemini_out:
-        blob = TextBlob(gemini_out)
-        gemini_tone = "Positive" if blob.sentiment.polarity > 0.2 else "Neutral" if blob.sentiment.polarity > -0.1 else "Negative"
-        st.metric("Tone", gemini_tone)
+    claude_input = st.text_area("📥 Paste Claude Summary", height=150)
+    if st.button("🧠 Run Claude Tone Analysis"):
+        tone = detect_tone(claude_input)
+        st.success(f"Claude Tone: {tone}")
 
-# ----- ALIGNMENT -----
-def verdict(gt, ct):
-    return "✅ Aligned" if gt == ct else "❌ Conflict"
+    if gpt_input and claude_input:
+        gpt_summary = generate_gpt_summary(gpt_input)
+        verdict_result, gpt_t, claude_t = verdict(gpt_summary, claude_input)
+        st.markdown("---")
+        st.subheader("🧠 GPT vs Claude Verdict")
+        st.write(f"**GPT Tone:** {gpt_t}")
+        st.write(f"**Claude Tone:** {claude_t}")
+        st.success("✅ Verdict: ALIGNED") if verdict_result else st.error("❌ Verdict: MISMATCH")
 
-if gpt_tone and claude_tone:
-    st.subheader("⚖️ Verdict")
-    st.success(f"Claude and GPT verdict: {verdict(gpt_tone, claude_tone)}")
+elif page == "📡 Trend Scanner":
+    st.title("📡 Sentiment Trend Scanner")
+    ticker = st.text_input("Enter Ticker Symbol")
+    if ticker:
+        score = gemini_sentiment_fusion(ticker.upper())
+        st.info(f"📊 Sentiment Fusion Score for {ticker.upper()}: {score}")
 
-# ----- CSV BACKTEST READER -----
-if uploaded_file:
-    st.subheader("📈 Backtest & Replay Results")
-    df = pd.read_csv(uploaded_file)
-    st.dataframe(df)
+elif page == "📘 Strategy Replay":
+    st.title("📘 Strategy Replay: Backtest a Trade")
+    past_trade = st.text_area("📥 Paste Historical Trade Notes", height=200)
+    if st.button("🎞️ Simulate Summary"):
+        result = simulate_trade_summary(past_trade)
+        st.subheader("📈 Replay Summary")
+        st.write(result)
 
-    # Profit Curve
-    if 'Profit' in df.columns:
-        st.line_chart(df['Profit'].cumsum(), use_container_width=True)
+elif page == "🧠 Verdict Hub":
+    st.title("🧠 Final Summary Comparator")
+    col1, col2, col3 = st.columns(3)
 
-    # Heatmap
-    if 'Profit' in df.columns and 'Trade ID' in df.columns:
-        pivot = df.pivot_table(index='Trade ID', values='Profit', aggfunc='sum')
-        fig, ax = plt.subplots()
-        pivot.plot(kind='barh', ax=ax, color='skyblue')
-        st.pyplot(fig)
+    with col1:
+        gpt_block = st.text_area("Paste GPT-4 Summary", height=200)
+    with col2:
+        claude_block = st.text_area("Paste Claude Summary", height=200)
+    with col3:
+        gemini_score = st.text_input("Gemini Fusion Score")
 
-    # GPT-4 Row Summary Generator
-    st.subheader("🧠 GPT Summary per Trade Row")
-    for i, row in df.iterrows():
-        with st.expander(f"Trade {i+1}: {row.get('Ticker', 'N/A')}"):
-            setup = f"Ticker: {row.get('Ticker', '')}\nStrategy: {row.get('Strategy', '')}\nProfit: {row.get('Profit', '')}"
-            if st.button(f"Summarize Row {i+1}"):
-                response = openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": "You are a trading analyst."},
-                        {"role": "user", "content": f"Summarize this trade:\n\n{setup}"}
-                    ]
-                )
-                st.write(response.choices[0].message.content)
-
-st.markdown("---")
-st.markdown("Built for **Delta Ghost** | All data auto-cleansed and archived. 🧠📈")
+    if st.button("🔎 Compare All"):
+        tone_gpt = detect_tone(gpt_block)
+        tone_claude = detect_tone(claude_block)
+        match = tone_gpt == tone_claude
+        st.subheader("🧠 Tone Verdict")
+        st.write(f"**GPT Tone:** {tone_gpt}")
+        st.write(f"**Claude Tone:** {tone_claude}")
+        st.write(f"**Gemini Fusion Score:** {gemini_score}")
+        st.success("✅ All LLMs Aligned") if match else st.warning("⚠️ Tones Diverge – Use Caution")
