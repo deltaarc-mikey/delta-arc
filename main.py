@@ -1,106 +1,93 @@
 import streamlit as st
-import yfinance as yf
-data = yf.download("MSFT", start="2024-11-15", end="2024-12-15")
-print(data.head())
 import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import datetime
+import datetime as dt
 import plotly.graph_objs as go
 
-st.set_page_config(page_title="Backtest & Strategy Replay", layout="wide")
-
-# -------------------------
-# Helper: Visualize trade
-# -------------------------
-def visualize_trade(data, entry_date, exit_date):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=data.index, y=data['Close'],
-        mode='lines', name='Close Price',
-        line=dict(color='lightblue')
-    ))
-    fig.add_trace(go.Scatter(
-        x=[entry_date], y=[data.loc[entry_date]['Close']],
-        mode='markers+text', name='Entry',
-        marker=dict(color='green', size=12),
-        text=["Entry"], textposition="bottom center"
-    ))
-    fig.add_trace(go.Scatter(
-        x=[exit_date], y=[data.loc[exit_date]['Close']],
-        mode='markers+text', name='Exit',
-        marker=dict(color='red', size=12),
-        text=["Exit"], textposition="top center"
-    ))
-    fig.update_layout(title="📈 Trade Visualization",
-                      xaxis_title="Date",
-                      yaxis_title="Price",
-                      height=500)
-    st.plotly_chart(fig, use_container_width=True)
-
-# -------------------------
-# App Title
-# -------------------------
+# Page config
+st.set_page_config(page_title="Backtest + Strategy Replay", layout="wide")
 st.title("📊 Backtesting + Strategy Replay Dashboard")
-st.header("📈 Backtest Single Trade")
 
-# -------------------------
-# Input Fields
-# -------------------------
-ticker = st.text_input("Enter Ticker:", value="AAPL")
-entry_date = st.text_input("Entry Date:", value="2025/06/17")
-exit_date = st.text_input("Exit Date:", value="2025/07/01")
-backtest_type = st.radio("Backtest Type:", ["Basic Price", "% Gain Target"])
-gain_target = st.slider("Target Gain % (if applicable):", 1, 100, 75)
+st.subheader("📈 Upload Historical Price Data (CSV)")
 
-# -------------------------
-# Backtest Logic
-# -------------------------
-if st.button("Run Backtest"):
+uploaded_file = st.file_uploader("Upload CSV with columns: Date, Open, High, Low, Close, Volume", type=["csv"])
+data = None
+
+ticker_list = []
+
+if uploaded_file is not None:
     try:
-        data = yf.download(ticker, start=entry_date, end=exit_date)
-        data.index = pd.to_datetime(data.index)
-        if data.empty:
-            st.warning("⚠️ No data found. Check ticker or date range.")
-        else:
-            if backtest_type == "Basic Price":
-                start_price = data.iloc[0]['Close']
-                end_price = data.iloc[-1]['Close']
-                percent_change = ((end_price - start_price) / start_price) * 100
-                result = f"💹 From {entry_date} to {exit_date}, {ticker} changed by {percent_change:.2f}%"
-                st.success(result)
-                visualize_trade(data, data.index[0], data.index[-1])
-
-            elif backtest_type == "% Gain Target":
-                subset = data.loc[entry_date:exit_date]
-                entry_price = float(subset.iloc[0]['Close'])
-                target_price = entry_price * (1 + gain_target / 100)
-
-                target_hit_date = None
-                for date, row in subset.iterrows():
-                    if row['Close'] >= target_price:
-                        target_hit_date = date
-                        break
-
-                if target_hit_date:
-                    result_str = f"🎯 Target hit on {target_hit_date.date()} — Price: ${row['Close']:.2f} — Gain: {(row['Close'] - entry_price)/entry_price*100:.2f}%"
-                    st.success(result_str)
-                    visualize_trade(data, data.index[0], target_hit_date)
-                else:
-                    st.warning(f"❌ Target not hit between {entry_date} and {exit_date}.")
-                    visualize_trade(data, data.index[0], data.index[-1])
+        df = pd.read_csv(uploaded_file, parse_dates=['Date'])
+        df = df.sort_values("Date")
+        df['Date'] = pd.to_datetime(df['Date'])
+        ticker = uploaded_file.name.split('.')[0].upper()
+        ticker_list.append(ticker)
+        data = df
+        st.success(f"✅ Successfully uploaded data for {ticker}")
+        st.dataframe(df.head())
     except Exception as e:
-        st.error(f"Error during backtest: {e}")
+        st.error(f"Error reading file: {e}")
 
-# -------------------------
-# Strategy Replay (Placeholder)
-# -------------------------
-st.header("⏮️ Strategy Replay Mode (Coming Soon)")
-st.info("⚙️ Strategy Replay will allow you to simulate historical alerts and decisions step-by-step. Stay tuned!")
+# Divider
+st.markdown("---")
+st.subheader("📉 Backtest Single Trade")
 
-# -------------------------
-# Claude Prompt Helper (Manual)
-# -------------------------
-st.header("🧠 Claude LLM Prompt")
-st.markdown("""
-    Paste this prompt into Claude (Sonnet 3.7) to get a historical trade summary:
-""")
+if data is not None:
+    selected_ticker = ticker_list[0]
+    entry_date = st.date_input("Entry Date:", value=dt.date.today() - dt.timedelta(days=30))
+    exit_date = st.date_input("Exit Date:", value=dt.date.today())
+    backtest_type = st.radio("Backtest Type:", ["Basic Price", "% Gain Target"])
+    target_gain = st.slider("Target Gain % (if applicable):", 1, 100, 25) if backtest_type == "% Gain Target" else None
+
+    if st.button("🚀 Run Backtest"):
+        try:
+            df_bt = data.copy()
+            df_bt = df_bt[(df_bt['Date'] >= pd.to_datetime(entry_date)) & (df_bt['Date'] <= pd.to_datetime(exit_date))]
+
+            if df_bt.empty:
+                st.warning("⚠️ No data found for the selected date range.")
+            else:
+                entry_price = df_bt.iloc[0]['Close']
+                exit_price = df_bt.iloc[-1]['Close']
+
+                result = {}
+                result['Entry Price'] = entry_price
+                result['Exit Price'] = exit_price
+                result['Return %'] = ((exit_price - entry_price) / entry_price) * 100
+
+                if backtest_type == "% Gain Target":
+                    target_price = entry_price * (1 + target_gain / 100)
+                    hit_target = (df_bt['Close'] >= target_price).any()
+                    result['Target Gain %'] = target_gain
+                    result['Target Hit?'] = "✅ Yes" if hit_target else "❌ No"
+
+                st.markdown(f"### 📌 {selected_ticker} Trade Summary")
+                st.json(result)
+
+                # Chart
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df_bt['Date'], y=df_bt['Close'], mode='lines+markers', name='Close Price'))
+                fig.update_layout(title=f"{selected_ticker} Price Chart", xaxis_title="Date", yaxis_title="Price")
+                st.plotly_chart(fig)
+
+        except Exception as e:
+            st.error(f"❌ Error during backtest: {e}")
+
+# Divider for Replay Mode and Claude Prompt
+st.markdown("---")
+st.subheader("⏪ Strategy Replay Mode (Coming Soon)")
+st.info("🔄 Strategy Replay will allow you to simulate historical alerts and decisions step-by-step. Stay tuned!")
+
+st.subheader("🧠 Claude LLM Prompt")
+st.markdown("Paste this prompt into Claude (Sonnet 3.7) to get a historical trade summary:")
+
+if data is not None:
+    cl_prompt = f"""
+You are an AI trading analyst. Review the historical price data for {selected_ticker} between {entry_date} and {exit_date}. Assume an entry on the first day and an exit on the last day. Report:
+- Entry price, Exit price
+- Percentage return
+- If a gain of {target_gain}% was achieved at any point (if applicable)
+- Simple technical notes (trend, price behavior)
+"""
+    st.code(cl_prompt, language='markdown')
+else:
+    st.warning("⬆️ Upload CSV data above to generate prompt.")
