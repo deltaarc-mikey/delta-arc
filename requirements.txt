@@ -1,1 +1,2 @@
-streamlityfinancelangchainlangchain-google-genairequestsbeautifulsoup4lxml
+streamlit
+pandas
