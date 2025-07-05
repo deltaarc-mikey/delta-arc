@@ -10,3 +10,4 @@ textblob
 google-api-python-client
 pytrends
 Pillow
+requests
