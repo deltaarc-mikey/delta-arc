@@ -1,89 +1,127 @@
-# -*- coding: utf-8 -*-
-import os
-import yfinance as yf
-import requests
-from bs4 import BeautifulSoup
 import streamlit as st
+import yfinance as yf
+import matplotlib.pyplot as plt
 import io
-import contextlib
+import pandas as pd
+from googleapiclient.discovery import build # New import for Google Search
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import Tool, AgentExecutor, create_react_agent
-from langchain import hub
+# Set a non-interactive backend for Matplotlib
+plt.switch_backend('agg')
 
-# ---- TOOL DEFINITIONS ----
-def get_stock_data(ticker_symbol):
-    """Fetches recent stock price data."""
-    stock_data = yf.download(ticker_symbol, period='10d', progress=False)
-    return stock_data.to_string()
+# --- Tool Definitions ---
 
-def get_manual_options_data(ticker_symbol):
-    """Reads manually uploaded options data from a file."""
+def generate_price_chart(tickers_string):
+    """
+    Generates a comparative stock price chart for a given list of tickers.
+    Useful for visualizing price trends and performance.
+    Input should be a string of comma-separated tickers (e.g., 'AAPL,MSFT').
+    """
+    # (This function code is unchanged)
+    tickers = [ticker.strip().upper() for ticker in tickers_string.split(',') if ticker.strip()]
+    if not tickers: return "No tickers provided."
+    raw_data = yf.download(tickers, period='1y', progress=False)
+    if raw_data.empty: return f"Could not find any data for the tickers: {', '.join(tickers)}."
+    if 'Adj Close' in raw_data.columns:
+        price_data, price_label = raw_data['Adj Close'], 'Adjusted Close Price'
+    elif 'Close' in raw_data.columns:
+        price_data, price_label = raw_data['Close'], 'Close Price'
+    else: return "Could not find 'Adj Close' or 'Close' columns."
+    if isinstance(price_data, pd.Series): price_data = price_data.to_frame(name=tickers[0])
+    price_data.dropna(axis=1, how='all', inplace=True)
+    if price_data.empty: return f"All tickers provided were invalid or had no data: {', '.join(tickers)}."
+    fig, ax = plt.subplots(figsize=(12, 7))
+    price_data.plot(ax=ax)
+    ax.set_title('Stock Price Comparison (Last Year)', fontsize=16)
+    ax.set_ylabel(f'{price_label} (USD)', fontsize=12)
+    ax.set_xlabel('Date', fontsize=12)
+    ax.grid(True)
+    ax.legend(title='Tickers')
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+# vvv NEW TOOL FUNCTION vvv
+def Google Search_for_news(query):
+    """
+    Performs a Google search for the latest news on a given topic or company.
+    Useful for finding recent developments, press releases, and market sentiment.
+    Input should be a search query string (e.g., 'NVIDIA AI chip news').
+    """
     try:
-        with open('options_data.txt', 'r') as f:
-            full_text = f.read()
-        sections = full_text.split('---')
-        for section in sections:
-            if f"TICKER: {ticker_symbol.upper()}" in section:
-                return section.strip()
-        return f"No options data found for {ticker_symbol} in the file."
-    except FileNotFoundError:
-        return "The 'options_data.txt' file was not found. Please upload it to the GitHub repository."
+        api_key = st.secrets["GOOGLE_API_KEY"]
+        cse_id = st.secrets["GOOGLE_CSE_ID"]
+        service = build("customsearch", "v1", developerKey=api_key)
+        # Get the top 5 results
+        res = service.cse().list(q=query, cx=cse_id, num=5).execute()
 
-def get_fundamental_data(ticker_symbol):
-    """Gets key fundamental data by directly scraping the Finviz website."""
-    try:
-        url = f"https://finviz.com/quote.ashx?t={ticker_symbol}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        snapshot_table = soup.find('table', class_='snapshot-table2')
-        data = {}
-        rows = snapshot_table.find_all('tr')
-        for row in rows:
-            cols = row.find_all('td')
-            for i in range(0, len(cols), 2):
-                metric = cols[i].text.strip()
-                value = cols[i+1].text.strip()
-                data[metric] = value
-        key_metrics = {"Market Cap": data.get("Market Cap"), "P/E": data.get("P/E"), "EPS (ttm)": data.get("EPS (ttm)")}
-        return "\n".join([f"{key}: {value}" for key, value in key_metrics.items()])
+        # Format the results into a single string
+        if 'items' in res:
+            formatted_results = []
+            for item in res['items']:
+                title = item.get('title', 'No Title')
+                link = item.get('link', '#')
+                snippet = item.get('snippet', 'No snippet available.').replace('\n', '')
+                formatted_results.append(f"Title: {title}\nLink: {link}\nSnippet: {snippet}\n---")
+            return "\n".join(formatted_results)
+        else:
+            return f"No search results found for '{query}'."
     except Exception as e:
-        return f"Could not retrieve Finviz data for {ticker_symbol}. Error: {e}"
+        return f"An error occurred during the search: {e}"
 
-def run_full_analysis(ticker_symbol):
-    """Runs a full analysis by gathering all available data."""
-    price_data = get_stock_data(ticker_symbol)
-    fundamental_data = get_fundamental_data(ticker_symbol)
-    options_data = get_manual_options_data(ticker_symbol)
-    return f"ANALYSIS FOR {ticker_symbol}:\n\nPrice Data:\n{price_data}\n\nFundamental Data:\n{fundamental_data}\n\nManual Options Data:\n{options_data}"
 
-# ---- AGENT AND UI SETUP ----
-st.title("🤖 AI Financial Analyst")
+# --- Agent and UI Setup ---
+# (This part is updated to include the new tool)
 
+st.set_page_config(layout="wide")
+st.title("📈 Advanced AI Analyst")
+st.write("This AI can generate charts and search the web for the latest news.")
+
+# We only need to rebuild the agent if it doesn't exist in the session
 if 'agent_executor' not in st.session_state:
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=st.secrets["secret"])
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain.agents import Tool, AgentExecutor, create_react_agent
+    from langchain import hub
+
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=st.secrets["GOOGLE_API_KEY"])
+
+    # Add the new Google Search_for_news to our list of tools
     tools = [
-        Tool(name="run_full_analysis", func=run_full_analysis, description="Use when the user asks for a 'full analysis', 'summary', or 'overview'. Gathers all info."),
-        Tool(name="get_stock_data", func=get_stock_data, description="Use for recent stock market PRICE and VOLUME data."),
-        Tool(name="get_manual_options_data", func=get_manual_options_data, description="Use for manually uploaded OPTIONS FLOW data."),
-        Tool(name="get_fundamental_data", func=get_fundamental_data, description="Use for key FUNDAMENTAL metrics (P/E, Market Cap, etc.).")
+        Tool(
+            name="generate_price_chart",
+            func=generate_price_chart,
+            description="Use to create a stock price comparison chart. Input is a string of tickers like 'AAPL,MSFT'."
+        ),
+        Tool(
+            name="Google Search_for_news",
+            func=Google Search_for_news,
+            description="Use to search for recent news on a company or topic. Input is a search query string."
+        )
     ]
+
     prompt = hub.pull("hwchase17/react")
     agent = create_react_agent(llm, tools, prompt)
     st.session_state.agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-user_question = st.text_input("Ask a question (e.g., 'Give me a full analysis of NVDA'):")
+
+# --- UI Interaction ---
+# The UI code is unchanged, but we'll update the default text
+
+st.header("Ask me anything:")
+user_question = st.text_input(
+    "Examples: 'Chart the price of TSLA,RIVN,LCID' or 'What is the latest news on Vertiv Holdings?'",
+    ""
+)
 
 if user_question:
-    string_io = io.StringIO()
     with st.spinner("Thinking..."):
-        with contextlib.redirect_stdout(string_io):
-            response = st.session_state.agent_executor.invoke({"input": user_question})
-        thought_process = string_io.getvalue()
+        # The agent will now automatically choose between charting and searching
+        response = st.session_state.agent_executor.invoke({"input": user_question})
+        output = response.get("output")
 
-    st.markdown("### Final Answer:")
-    st.write(response.get("output"))
-
-    with st.expander("Show Thought Process"):
-        st.text(thought_process)
+        # Check if the output is an image buffer from our chart tool
+        if isinstance(output, io.BytesIO):
+            st.image(output)
+        else:
+            st.write(output)
