@@ -8,7 +8,12 @@ st.title("📉 Strategy Replay Mode + Batch Backtest Loop")
 
 # Load base chart data
 csv_file_path = "AAPL_Strategy_Replay_Enhanced.csv"
-df = pd.read_csv(csv_file_path, parse_dates=["Date"])
+if file is not None:
+    df = pd.read_csv(file, parse_dates=["Date"])
+    df["Date"] = pd.to_datetime(df["Date"])
+else:
+    st.warning("Please upload a CSV file to proceed.")
+    st.stop()
 df.set_index("Date", inplace=True)
 
 # Sidebar: Strategy Replay Controls
