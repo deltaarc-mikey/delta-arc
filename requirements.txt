@@ -4,3 +4,4 @@ plotly
 yfinance
 matplotlib
 openai
+seaborn
