@@ -1,105 +1,70 @@
-# main.py - FINAL VERSION with Gemini Automation + Client UI Packaging
-
-import vertexai
-from vertexai.preview.language_models import ChatModel
-import os
 import streamlit as st
-import json
+import pandas as pd
+import base64
 
-# Load secrets
-project = st.secrets["VERTEXAI_PROJECT"]
-location = st.secrets["VERTEXAI_LOCATION"]
-credentials_json = json.loads(st.secrets["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
+st.set_page_config(page_title="Delta Ghost: Options AI", layout="wide")
+st.title("📈 Delta Ghost: AI-Powered Options Intelligence")
 
-# Initialize Vertex AI
-vertexai.init(project=project, location=location, credentials=credentials_json)
+# Sidebar
+st.sidebar.header("📂 Upload & Filter")
+uploaded_file = st.sidebar.file_uploader("Upload CSV with Options Data", type=["csv"])
 
-# Load Gemini model
-gemini_chat = ChatModel.from_pretrained("chat-bison@001").start_chat()
+cost_limit = st.sidebar.number_input("Max Cost per Contract ($)", min_value=0.0, value=0.50, step=0.05)
 
-# Load API Key
-load_dotenv()
-PROJECT_ID = os.getenv("GEMINI_PROJECT_ID")
-LOCATION = os.getenv("GEMINI_REGION")
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+# Tabs setup
+tabs = st.tabs(["📊 Summary", "🤖 LLM Output", "🔍 Unusual Options Activity", "📢 Reddit Sentiment", "📈 Google Trends"])
 
-# Gemini Model Load
-gemini_chat = ChatModel.from_pretrained("chat-bison-32k")
-chat_session = gemini_chat.start_chat()
+# Placeholder for data
+options_df = None
 
-# App UI Configuration
-st.set_page_config(layout="wide", page_title="Delta Ghost AI Trading Suite")
-st.title("📈 Delta Ghost AI Trading Dashboard")
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file)
+        options_df = df[df["price"] <= cost_limit]
+    except Exception as e:
+        st.sidebar.error(f"Failed to process file: {e}")
 
-# Sidebar Navigation
-st.sidebar.header("Navigation")
-tabs = st.sidebar.radio("Select Tool:", [
-    "📊 GPT Trade Evaluator",
-    "🧠 Claude Summary Comparator",
-    "🪙 Gemini Macro & Sentiment Analysis",
-    "🧾 Combined Verdict Engine",
-    "📤 Export & Logs"
-])
+# Summary Tab
+with tabs[0]:
+    st.subheader("📊 Summary of Filtered Contracts")
+    if options_df is not None:
+        st.write(f"Showing {len(options_df)} contracts under ${cost_limit:.2f} per contract")
+        st.dataframe(options_df, use_container_width=True)
+    else:
+        st.info("Upload a CSV to see summary data.")
 
-# GPT Evaluator Panel
-if tabs == "📊 GPT Trade Evaluator":
-    st.subheader("GPT Summary Generator")
-    trade_input = st.text_area("Paste trade thesis or logic here:")
-    if st.button("Generate GPT Summary"):
-        with st.spinner("Analyzing with GPT-4..."):
-            gpt_output = f"🧠 GPT Summary for: {trade_input}\n\n- Strategy Logic: High volume breakout\n- Risk Profile: Medium\n- Entry Confidence: 88%\n- Tone: Positive"
-            st.success("Generated")
-            st.text_area("GPT Result:", value=gpt_output, height=200)
+# LLM Output Tab (Claude/GPT manual ingestion)
+with tabs[1]:
+    st.subheader("🤖 Paste LLM Output (Claude or GPT)")
+    llm_text = st.text_area("Paste full LLM output text here:")
+    if llm_text:
+        st.markdown("### Parsed Output")
+        st.write(llm_text)
 
-# Claude Summary Panel
-if tabs == "🧠 Claude Summary Comparator":
-    st.subheader("Claude Summary Input")
-    claude_summary = st.text_area("Paste manually from Claude:")
-    if claude_summary:
-        st.markdown("**Claude Tone Analysis:**")
-        if any(x in claude_summary.lower() for x in ["strong", "confident", "positive"]):
-            tone = "🟢 Positive"
-        elif "caution" in claude_summary.lower():
-            tone = "🟡 Neutral"
-        else:
-            tone = "🔴 Negative"
-        st.write(f"Detected Tone: {tone}")
+# Unusual Options Activity Tab
+with tabs[2]:
+    st.subheader("🔍 Unusual Options Activity Summary")
+    uoa_notes = st.text_area("Paste UOA comments or summarized signals here:")
+    if uoa_notes:
+        st.markdown("### UOA Commentary")
+        st.write(uoa_notes)
 
-# Gemini Integration Tab
-if tabs == "🪙 Gemini Macro & Sentiment Analysis":
-    st.subheader("Gemini Market Validator")
-    gemini_input = st.text_area("Enter a ticker, trade logic, or market question:")
-    if st.button("Ask Gemini"):
-        with st.spinner("Querying Gemini..."):
-            gemini_response = chat_session.send_message(gemini_input)
-            st.success("Gemini response ready")
-            st.text_area("Gemini Result:", value=gemini_response.text, height=200)
+# Reddit Sentiment Tab
+with tabs[3]:
+    st.subheader("📢 Reddit Sentiment Scan")
+    reddit_text = st.text_area("Paste Reddit sentiment summary or findings here:")
+    if reddit_text:
+        st.markdown("### Reddit Market Pulse")
+        st.write(reddit_text)
 
-# Verdict Fusion Engine
-if tabs == "🧾 Combined Verdict Engine":
-    st.subheader("Trade Verdict Validator")
-    gpt_confidence = st.slider("GPT Confidence %", 0, 100, 85)
-    gpt_tone = st.selectbox("GPT Tone", ["Positive", "Neutral", "Negative"])
-    claude_tone = st.selectbox("Claude Tone", ["Positive", "Neutral", "Negative"])
-    gemini_positioning = st.selectbox("Gemini View", ["Bullish", "Neutral", "Bearish"])
+# Google Trends Tab
+with tabs[4]:
+    st.subheader("📈 Google Trends Snapshot")
+    trends_text = st.text_area("Paste Google Trends summary or screenshot notes here:")
+    if trends_text:
+        st.markdown("### Trend Commentary")
+        st.write(trends_text)
 
-    if st.button("Get Verdict"):
-        if gpt_confidence >= 85 and gpt_tone == "Positive" and claude_tone == "Positive" and gemini_positioning == "Bullish":
-            st.success("✅ All signals aligned. Trade is VALID.")
-        else:
-            st.warning("⚠️ Trade fails alignment filters. Avoid or downsize.")
-
-# Export Tab
-if tabs == "📤 Export & Logs":
-    st.subheader("Download Daily Report")
-    notes = st.text_area("Any notes to save with today’s report?")
-    if st.button("Download Summary Log"):
-        df = pd.DataFrame({
-            "Trade Thesis": [trade_input],
-            "Claude Summary": [claude_summary],
-            "Notes": [notes],
-        })
-        df.to_csv("daily_log.csv", index=False)
-        st.download_button("Download CSV", data=df.to_csv().encode("utf-8"), file_name="daily_log.csv")
-
-st.sidebar.caption("Built with 💼 by Delta Ghost • Powered by GPT, Claude & Gemini")
+# Footer
+st.markdown("---")
+st.caption("Developed by Delta Ghost | AI-driven Options Strategy | Version 2.0")
