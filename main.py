@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import base64
 
-st.set_page_config(page_title="Delta Ghost: Options AI", layout="wide")
+st.set_page_config(page_title="Delta Ghost: Options AI Full Suite", layout="wide")
 st.title("📈 Delta Ghost: AI-Powered Options Intelligence")
 
 # Sidebar
