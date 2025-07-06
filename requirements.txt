@@ -12,3 +12,4 @@ pytrends
 Pillow
 requests
 tweepy
+python-dotenv
