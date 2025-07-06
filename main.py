@@ -1,11 +1,21 @@
 # main.py - FINAL VERSION with Gemini Automation + Client UI Packaging
 
-import os
-import streamlit as st
-import pandas as pd
-from dotenv import load_dotenv
-from vertexai.preview.language_models import ChatModel, InputOutputTextPair
 import vertexai
+from vertexai.preview.language_models import ChatModel
+import os
+import json
+import streamlit as st
+
+# Load secrets
+project = st.secrets["VERTEXAI_PROJECT"]
+location = st.secrets["VERTEXAI_LOCATION"]
+credentials_json = json.loads(st.secrets["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
+
+# Initialize Vertex AI
+vertexai.init(project=project, location=location, credentials=credentials_json)
+
+# Load Gemini model
+gemini_chat = ChatModel.from_pretrained("chat-bison-32k").start_chat()
 
 # Load API Key
 load_dotenv()
