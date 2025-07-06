@@ -1,5 +1,9 @@
 streamlit
 pandas
+matplotlib
+plotly
+wordcloud
+nltk
+textblob
+praw
 python-dotenv
-google-cloud-aiplatform==1.38.1
-protobuf<4.0.0
