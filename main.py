@@ -58,7 +58,7 @@ def run_unusual_whales():
     params = {
         "limit": 100,
         "min_premium": 0.01,
-        "max_premium": 0.50,
+        "max_premium": 2.50,
         "earliest_expiration": "2025-11-17",
         "type": "all",
         "sort": "volume",
@@ -74,7 +74,7 @@ def run_unusual_whales():
         if df.empty:
             raise ValueError("No data returned from UW API.")
 
-        df = df[df['ask'] <= 0.50]
+        df = df[df['ask'] <= 2.50]
         df = df[df['expiration'] >= "2025-11-17"]
         df = df[df['open_interest'] > 1000]
 
