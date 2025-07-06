@@ -1,5 +1,5 @@
 streamlit
 pandas
 python-dotenv
-google-cloud-aiplatform>=1.40.0
+google-cloud-aiplatform==1.38.1
 protobuf<4.0.0
