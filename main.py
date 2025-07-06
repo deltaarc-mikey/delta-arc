@@ -1,125 +1,103 @@
-
-import streamlit as st
-import openai
 import os
-from datetime import datetime
-import yfinance as yf
-from pytrends.request import TrendReq
-import praw
+import openai
+import streamlit as st
 import pandas as pd
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Set page config
-st.set_page_config(page_title="Delta Ghost Dashboard", layout="wide")
+# ---------- GPT Trade Summary Processor ----------
+def process_gpt_summary(summary_text):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a professional options trader and financial analyst."},
+                {"role": "user", "content": f"""
+The following is a trade setup summary. Return:
+1. Your confidence score from 1 to 100 (as a number only),
+2. The tone (positive, neutral, or negative),
+in JSON format with keys: confidence and tone.
 
-# API Keys from environment variables
-openai.api_key = os.getenv("OPENAI_API_KEY")
-reddit = praw.Reddit(
-    client_id=os.getenv("REDDIT_CLIENT_ID"),
-    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-    user_agent="delta-ghost-sentiment"
-)
+Text:
+\"\"\"
+{summary_text}
+\"\"\"
+                """}
+            ],
+            temperature=0.5
+        )
+        reply = response.choices[0].message.content.strip()
+        return reply
+    except Exception as e:
+        return f"Error: {e}"
 
-# ---- Sidebar ----
-st.sidebar.title("🔧 Navigation")
-tab = st.sidebar.radio("Select Tool", ["📈 Ticker Overview", "📊 Reddit + Google Trends", "🤖 Trade Validator", "📁 Backtest Runner", "🎯 Claude Prompt Tuner"])
+# ---------- Layout ----------
+st.set_page_config(page_title="Delta Ghost – Trade Validator", layout="wide")
+st.title("📉 Delta Ghost – Trade Validator")
 
-# ---- Ticker Overview Tab ----
-if tab == "📈 Ticker Overview":
-    st.title("📈 Ticker Overview")
-    ticker = st.text_input("Enter a ticker symbol (e.g., AAPL, TSLA)")
-    if ticker:
-        data = yf.download(ticker, period="1mo", interval="1d")
-        st.line_chart(data["Close"])
+# ---------- Tabs ----------
+tab1, tab2 = st.tabs(["📊 Trade Validator", "⚡ Claude Prompt Tuner"])
 
-# ---- Reddit + Google Trends Tab ----
-elif tab == "📊 Reddit + Google Trends":
-    st.title("📊 Reddit + Google Trends Sentiment Analysis")
+# ---------- Tab 1: Trade Validator ----------
+with tab1:
+    st.subheader("📌 Trade Evaluation Results")
 
-    tickers = st.text_input("Enter tickers (comma-separated)").upper().split(",")
-    if tickers and tickers[0]:
-        pytrends = TrendReq(hl='en-US', tz=360)
-        trends_df = pd.DataFrame(columns=["Ticker", "Google Trend Score", "Reddit Mentions"])
-
-        for ticker in tickers:
-            search_term = ticker.strip()
-            # Google Trends
-            try:
-                pytrends.build_payload([search_term], cat=0, timeframe='now 7-d', geo='', gprop='')
-                interest = pytrends.interest_over_time()
-                trend_score = int(interest[search_term].mean()) if not interest.empty else 0
-            except:
-                trend_score = 0
-
-            # Reddit Mentions
-            try:
-                reddit_mentions = 0
-                for submission in reddit.subreddit("wallstreetbets+stocks+options").search(search_term, limit=20):
-                    reddit_mentions += 1
-            except:
-                reddit_mentions = 0
-
-            trends_df.loc[len(trends_df)] = [search_term, trend_score, reddit_mentions]
-
-        st.dataframe(trends_df)
-
-# ---- Trade Validator ----
-elif tab == "🤖 Trade Validator":
-    st.title("🤖 Delta Ghost – Trade Validator")
-
-    gpt_input = st.text_area("🧠 GPT Summary Prompt Input", height=200)
-    claude_input = st.text_area("🧠 Claude Summary Text (Paste manually)", height=200)
+    gpt_input = st.text_area("🧠 GPT Summary Prompt Input", height=180, placeholder="Paste GPT trade summary here...")
+    claude_input = st.text_area("🧠 Claude Summary Text (Paste manually)", height=160, placeholder="Paste Claude analysis here...")
 
     if st.button("▶️ Run GPT Summary"):
-        try:
-            gpt_response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a professional options analyst."},
-                    {"role": "user", "content": gpt_input}
-                ]
-            )
-            gpt_summary = gpt_response["choices"][0]["message"]["content"]
+        if gpt_input.strip() == "":
+            st.warning("Please enter a GPT trade summary.")
+        else:
+            result = process_gpt_summary(gpt_input)
+            try:
+                parsed = eval(result) if isinstance(result, str) else result
+                gpt_confidence = parsed.get("confidence", "N/A")
+                gpt_tone = parsed.get("tone", "N/A")
+            except:
+                gpt_confidence = "ParseError"
+                gpt_tone = "ParseError"
 
-            # Scoring logic
-            gpt_confidence = 75 if "strong" in gpt_summary.lower() else 50
-            gpt_tone = "Positive" if "bullish" in gpt_summary.lower() else "Neutral"
-            claude_tone = "Positive" if "opportunistic" in claude_input.lower() else "Neutral"
-            auto_score = int((gpt_confidence + (80 if claude_tone == "Positive" else 60)) / 2)
+            # Estimate Claude tone manually
+            if "bullish" in claude_input.lower():
+                claude_tone = "Positive"
+            elif "cautious" in claude_input.lower():
+                claude_tone = "Neutral"
+            elif "bearish" in claude_input.lower():
+                claude_tone = "Negative"
+            else:
+                claude_tone = "N/A"
 
-            result = pd.DataFrame([{
+            # Auto Score Logic
+            try:
+                auto_score = int(gpt_confidence) if gpt_confidence != "ParseError" else 0
+            except:
+                auto_score = 0
+
+            st.markdown("### 📈 Trade Summary Evaluation Table")
+            df = pd.DataFrame([{
                 "Ticker": "Manual Input",
                 "GPT Confidence Score": gpt_confidence,
                 "GPT Tone": gpt_tone,
                 "Claude Tone": claude_tone,
                 "Auto Score": auto_score
             }])
+            st.dataframe(df, use_container_width=True)
 
-            st.dataframe(result)
-        except Exception as e:
-            st.error(f"OpenAI API Error: {str(e)}")
+# ---------- Tab 2: Claude Prompt Tuner ----------
+with tab2:
+    st.subheader("🛠 Claude Prompt Tuner")
+    st.markdown("""
+Use this section to refine prompt instructions you’ll copy/paste into Claude manually.
 
-# ---- Backtest Runner ----
-elif tab == "📁 Backtest Runner":
-    st.title("📁 Strategy Backtest Batch Runner")
-    uploaded_file = st.file_uploader("Upload historical trades CSV", type=["csv"])
-    if uploaded_file:
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.dataframe(df.head())
-            st.success("File uploaded and valid. Proceeding with backtest...")
-            # Insert scoring logic here
-        except Exception as e:
-            st.error(f"CSV Error: {str(e)}")
+**Template:**
+    Trade: Buy-to-Open Call Debit Spread – $TICKER STRIKE/STRIKEC, Expiration: MM/DD/YYYY
+Entry Cost: $X.XX
 
-# ---- Claude Prompt Tuner ----
-elif tab == "🎯 Claude Prompt Tuner":
-    st.title("🎯 Claude Prompt Tuner")
-    tone_choice = st.selectbox("Select Desired Tone Style", ["Quantitative", "Retail Buzz", "Neutral"])
-    if tone_choice == "Quantitative":
-        st.code("This setup exhibits strong technical alignment with risk-defined upside based on implied volatility skews and recent EMA crossovers.")
-    elif tone_choice == "Retail Buzz":
-        st.code("This trade is HOT right now — breaking resistance, Reddit is hyped, and the flow is surging!")
-    else:
-        st.code("The trade has balanced technicals with neutral sentiment. Suitable for conservative positioning.")
+Summary: {Insert short paragraph with macro + technical justification here.}
+
+Please summarize this trade idea. Rate the confidence 1–100 and describe tone: positive, neutral, or negative.
+    """)
