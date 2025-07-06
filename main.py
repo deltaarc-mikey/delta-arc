@@ -94,10 +94,3 @@ with tab2:
 Use this section to refine prompt instructions you’ll copy/paste into Claude manually.
 
 **Template:**
-    Trade: Buy-to-Open Call Debit Spread – $TICKER STRIKE/STRIKEC, Expiration: MM/DD/YYYY
-Entry Cost: $X.XX
-
-Summary: {Insert short paragraph with macro + technical justification here.}
-
-Please summarize this trade idea. Rate the confidence 1–100 and describe tone: positive, neutral, or negative.
-    """)
