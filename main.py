@@ -15,7 +15,7 @@ credentials_json = json.loads(st.secrets["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
 vertexai.init(project=project, location=location, credentials=credentials_json)
 
 # Load Gemini model
-gemini_chat = ChatModel.from_pretrained("chat-bison-32k").start_chat()
+gemini_chat = ChatModel.from_pretrained("chat-bison@001").start_chat()
 
 # Load API Key
 load_dotenv()
