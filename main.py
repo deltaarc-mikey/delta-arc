@@ -8,6 +8,8 @@ from pytrends.request import TrendReq
 import praw
 import pandas as pd
 
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
 # Set page config
 st.set_page_config(page_title="Delta Ghost Dashboard", layout="wide")
 
