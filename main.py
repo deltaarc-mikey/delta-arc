@@ -4,18 +4,15 @@ import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 
-# ✅ Load environment variables from .env file (if running locally)
-load_dotenv()
+load_dotenv()  # ✅ Loads variables from .env
 
-# ✅ Check for API key from .env or Streamlit secrets
-api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-if not api_key:
-    st.error("❌ OpenAI API key is missing. Please set 'OPENAI_API_KEY' in your .env file or Streamlit secrets.")
+if not openai.api_key or not openai.api_key.startswith("sk-"):
+    st.error("❌ OpenAI API key not loaded. Please ensure your .env file is in the root directory.")
     st.stop()
 
-# ✅ Set the OpenAI key
-openai.api_key = api_key
+st.write("Loaded API Key (hidden):", "✅" if os.getenv("OPENAI_API_KEY") else "❌ MISSING")
 
 # ---------- GPT Trade Summary Processor ----------
 def process_gpt_summary(summary_text):
