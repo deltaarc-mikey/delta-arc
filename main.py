@@ -1,109 +1,85 @@
 import streamlit as st
 import pandas as pd
-import openai
-import re
+from textblob import TextBlob
+from openai import OpenAI
 
-# Set page config
-st.set_page_config(page_title="Delta Ghost – Unified AI Dashboard", layout="wide")
-st.title("🧠 Delta Ghost – Unified AI Trading Suite")
+# Initialize OpenAI client
+client = OpenAI()
+
+st.set_page_config(page_title="Delta Ghost – Trade Validator", layout="wide")
+st.title("📈 Delta Ghost – Trade Validator")
 
 # Tabs
-validator_tab, sentiment_tab, replay_tab, optimizer_tab, claude_tab = st.tabs([
-    "✅ Trade Validator", "📊 Sentiment Fusion", "📁 Replay Engine", "⚙️ Optimizer", "🛠️ Claude Prompt Tuner"
-])
+tab1, tab2, tab3 = st.tabs(["📊 Trade Validator", "🧪 Backtest Runner", "🛠️ Claude Prompt Tuner"])
 
-# =============== TRADE VALIDATOR TAB ===============
-with validator_tab:
-    st.header("✅ LLM Trade Validator")
-    gpt_input = st.text_area("📥 GPT Summary Prompt Input", height=150)
-    claude_input = st.text_area("📥 Claude Summary Text (Paste manually)", height=150)
-    run = st.button("▶️ Run GPT Summary")
+# Shared session state for results
+if "results" not in st.session_state:
+    st.session_state.results = []
 
-    if run and gpt_input:
-        with st.spinner("Analyzing with GPT..."):
-            openai.api_key = st.secrets["OPENAI_API_KEY"]
-            gpt_response = openai.ChatCompletion.create(
+with tab1:
+    st.header("📌 Trade Evaluation Results")
+
+    gpt_input = st.text_area("🧠 GPT Summary Prompt Input", height=150)
+    claude_input = st.text_area("🧠 Claude Summary Text (Paste manually)", height=150)
+
+    if st.button("▶️ Run GPT Summary"):
+        try:
+            gpt_response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone: {gpt_input}"}
+                    {"role": "system", "content": "You are a financial analyst."},
+                    {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone:\n{gpt_input}"}
                 ]
             )
-            gpt_text = gpt_response["choices"][0]["message"]["content"]
+            reply = gpt_response.choices[0].message.content
 
-            score_match = re.search(r"(Confidence|Score).*?(\d{1,3})", gpt_text, re.IGNORECASE)
-            tone_match = re.search(r"(Tone|Sentiment).*?:?\s*(\w+)", gpt_text, re.IGNORECASE)
-            score = int(score_match.group(2)) if score_match else "N/A"
-            tone = tone_match.group(2).capitalize() if tone_match else "N/A"
+            # Extract confidence score
+            confidence = None
+            for word in reply.split():
+                if word.strip('%').isdigit():
+                    num = int(word.strip('%'))
+                    if 0 <= num <= 100:
+                        confidence = num
+                        break
+
+            # Tone tagging
+            analysis = TextBlob(reply)
+            tone = "Positive" if analysis.sentiment.polarity > 0 else "Negative" if analysis.sentiment.polarity < 0 else "Neutral"
 
             # Claude tone
-            claude_tone = "Neutral"
-            if "positive" in claude_input.lower():
-                claude_tone = "Positive"
-            elif "negative" in claude_input.lower():
-                claude_tone = "Negative"
+            claude_analysis = TextBlob(claude_input)
+            claude_tone = "Positive" if claude_analysis.sentiment.polarity > 0 else "Negative" if claude_analysis.sentiment.polarity < 0 else "Neutral"
 
-            # Score fusion
-            if score != "N/A" and claude_tone == "Positive" and tone == "Positive":
-                auto_score = "✅ STRONG ENTRY"
-            elif score != "N/A" and "Neutral" in [claude_tone, tone]:
-                auto_score = "⚠️ MODERATE"
-            else:
-                auto_score = "❌ AVOID"
+            # Auto score: average of GPT confidence and tone alignment (basic example)
+            auto_score = (confidence if confidence else 50)
+            if tone == claude_tone:
+                auto_score += 10
 
-            df = pd.DataFrame([{
+            st.session_state.results.append({
                 "Ticker": "Manual Input",
-                "GPT Confidence Score": score,
+                "GPT Confidence Score": confidence,
                 "GPT Tone": tone,
                 "Claude Tone": claude_tone,
                 "Auto Score": auto_score
-            }])
-            st.dataframe(df)
+            })
 
-# =============== SENTIMENT FUSION TAB ===============
-with sentiment_tab:
-    st.header("📊 Sentiment Fusion Panel")
-    st.markdown("_Coming soon: Pull Reddit + Google + Gemini trend fusion_ 🧠")
-    st.info("This tab will show spike analysis from Reddit, Google Trends, and Gemini for early trade ideas.")
+        except Exception as e:
+            st.error(f"Error: {e}")
 
-# =============== REPLAY ENGINE TAB ===============
-with replay_tab:
-    st.header("📁 Strategy Replay Mode")
-    st.markdown("Upload a CSV of 50–100 historical trade setups. We'll simulate LLM outputs and score accuracy.")
-    st.markdown("Example format: `Ticker, Strategy, Expiry, Result (Win/Loss)`")
-    st.info("Coming soon: CSV ingestion, prompt simulation, backtest summary.")
+    if st.session_state.results:
+        df = pd.DataFrame(st.session_state.results)
+        st.dataframe(df)
 
-# =============== OPTIMIZER TAB ===============
-with optimizer_tab:
-    st.header("⚙️ Strategy Optimizer")
-    st.markdown("Paste any trade setup and GPT will suggest better spreads, expiries, or entries.")
-    setup = st.text_area("Paste strategy (e.g., TSLA call debit spread exp 7/12 @ 0.42)")
-    if st.button("🚀 Optimize Strategy"):
-        with st.spinner("Querying GPT..."):
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "user", "content": f"Given this strategy, how can we optimize expiry or strike? Suggest better structure: {setup}"}
-                ]
-            )
-            st.success("Suggestion:")
-            st.write(response["choices"][0]["message"]["content"])
+with tab2:
+    st.header("📂 Backtest Batch Runner")
+    uploaded_file = st.file_uploader("Upload CSV file of past trades", type=["csv"])
+    if uploaded_file:
+        df_backtest = pd.read_csv(uploaded_file)
+        st.write("✅ File uploaded and valid. Proceeding...")
+        st.dataframe(df_backtest)
 
-# =============== CLAUDE TUNER TAB ===============
-with claude_tab:
-    st.header("🛠️ Claude Prompt Tuner")
-    st.markdown("Select tone profile to create reusable Claude prompts.")
-    tone = st.selectbox("🎯 Choose Claude Tone Style", ["Quant-style", "Retail Buzz", "Neutral Analyst"])
-    if tone:
-        prompt = ""
-        if tone == "Quant-style":
-            prompt = "Summarize this options trade like a hedge fund quant. Prioritize data, math, and volatility edge."
-        elif tone == "Retail Buzz":
-            prompt = "Explain this trade like a Reddit meme stock pro. Use slang and excitement."
-        else:
-            prompt = "Summarize this trade in neutral tone with risk/reward and probability balance."
-
-        st.code(prompt, language="text")
-
-# Footer
-st.markdown("---")
-st.caption("Delta Ghost AI Suite © 2025 – Powered by GPT & Claude")
+with tab3:
+    st.header("🎯 Claude Prompt Tuner")
+    preset = st.selectbox("Choose Claude Tone Preset", ["Quantitative", "Retail Buzz", "Neutral", "Bearish", "Bullish"])
+    st.write("Claude prompt tone preset applied: ", preset)
+    custom_claude = st.text_area("✍️ Customize Claude prompt manually")
