@@ -13,3 +13,4 @@ Pillow
 requests
 tweepy
 python-dotenv
+praw
