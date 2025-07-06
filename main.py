@@ -3,8 +3,8 @@
 import vertexai
 from vertexai.preview.language_models import ChatModel
 import os
-import json
 import streamlit as st
+import json
 
 # Load secrets
 project = st.secrets["VERTEXAI_PROJECT"]
