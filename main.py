@@ -1,117 +1,78 @@
-
 import streamlit as st
-from textblob import TextBlob
+import pandas as pd
 import openai
-import os
 import requests
+import datetime
+from textblob import TextBlob
+import tweepy
 
-st.set_page_config(page_title="Delta Ghost: AI Trade Engine", layout="wide")
+# Twitter API setup (REPLACE with your credentials)
+twitter_bearer_token = "YOUR_TWITTER_BEARER_TOKEN"
+client = tweepy.Client(bearer_token=twitter_bearer_token)
 
-# Set OpenAI API Key
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# Sidebar navigation
-st.sidebar.title("📊 Delta Ghost Control Panel")
-tabs = ["📈 Trade Generator", "📡 Trend Scanner", "📘 Strategy Replay", "🧠 Verdict Hub"]
-page = st.sidebar.radio("Navigate", tabs)
-
-# --- GPT Summary Generator ---
-def generate_gpt_summary(gpt_input):
+def fetch_twitter_sentiment(ticker):
     try:
-        messages = [
-            {"role": "system", "content": "You are a financial analyst specializing in options trading."},
-            {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone:\n{gpt_input}"}
-        ]
-        response = openai.ChatCompletion.create(model="gpt-4", messages=messages)
-        return response.choices[0].message.content
+        query = f"${ticker} stock -is:retweet lang:en"
+        tweets = client.search_recent_tweets(query=query, max_results=20, tweet_fields=['text'])
+        tweet_texts = [tweet.text for tweet in tweets.data] if tweets.data else []
+        sentiments = [TextBlob(text).sentiment.polarity for text in tweet_texts]
+        avg_sentiment = round(sum(sentiments) / len(sentiments), 3) if sentiments else 0.0
+        return avg_sentiment, tweet_texts
     except Exception as e:
-        return f"Error: {e}"
+        return 0.0, [f"Error: {e}"]
 
-# --- Claude Summary Tone Detector ---
-def detect_tone(text):
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
-    if polarity > 0.1:
-        return "Positive"
-    elif polarity < -0.1:
-        return "Negative"
+def auto_score_trade(row):
+    base_score = row.get('GPT Confidence Score', 0)
+    gpt_tone = row.get('GPT Tone', '').lower()
+    claude_tone = row.get('Claude Tone', '').lower()
+    twitter_sentiment = row.get('Twitter Sentiment', 0.0)
+
+    bonus = 0
+    if gpt_tone == 'positive':
+        bonus += 5
+    if claude_tone == 'positive':
+        bonus += 5
+    if twitter_sentiment > 0.2:
+        bonus += 5
+    
+    return min(base_score + bonus, 100)
+
+# Streamlit UI
+st.set_page_config(page_title="Delta Ghost Trading AI Suite", layout="wide")
+st.title("🧠 Delta Ghost AI Trade Validator + Twitter/X Integrator")
+
+uploaded_file = st.file_uploader("📥 Upload your options trades CSV", type=["csv"])
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    if 'Ticker' not in df.columns:
+        st.error("❌ CSV must include a 'Ticker' column.")
     else:
-        return "Neutral"
+        st.success("✅ File uploaded and valid. Proceeding...")
 
-# --- Gemini Mock Sentiment Fuser (Replace with real logic/API as needed) ---
-def gemini_sentiment_fusion(ticker):
-    import random
-    score = random.randint(40, 90)
-    source = random.choice(["Reddit Buzz", "Google Trend", "Both"])
-    return f"{score} ({source})"
+        twitter_sentiments = []
+        twitter_notes = []
 
-# --- Strategy Replay GPT Summary ---
-def simulate_trade_summary(trade_notes):
-    return generate_gpt_summary(trade_notes)
+        with st.spinner("🔍 Fetching Twitter sentiment..."):
+            for idx, row in df.iterrows():
+                sentiment_score, notes = fetch_twitter_sentiment(row['Ticker'])
+                twitter_sentiments.append(sentiment_score)
+                twitter_notes.append("\n".join(notes[:3]))
 
-# --- Verdict Comparator ---
-def verdict(gpt_summary, claude_summary):
-    gpt_tone = detect_tone(gpt_summary)
-    claude_tone = detect_tone(claude_summary)
-    aligned = gpt_tone == claude_tone
-    return aligned, gpt_tone, claude_tone
+        df['Twitter Sentiment'] = twitter_sentiments
+        df['Twitter Notes'] = twitter_notes
+        df['Auto Score'] = df.apply(auto_score_trade, axis=1)
 
-# --- Layouts ---
-if page == "📈 Trade Generator":
-    st.title("📈 AI-Powered Trade Generator")
+        st.markdown("### 🔎 Twitter Sentiment Analysis")
+        st.dataframe(df[['Ticker', 'Twitter Sentiment', 'Twitter Notes']])
 
-    gpt_input = st.text_area("📥 Paste your trade idea / batch", height=200)
-    if st.button("🧠 Generate GPT-4 Summary"):
-        gpt_summary = generate_gpt_summary(gpt_input)
-        st.subheader("🧠 GPT-4 Summary")
-        st.write(gpt_summary)
+        st.markdown("### 📊 Trade Scoring (GPT + Claude + Twitter)")
+        st.dataframe(df[['Ticker', 'GPT Confidence Score', 'GPT Tone', 'Claude Tone', 'Twitter Sentiment', 'Auto Score']])
 
-    claude_input = st.text_area("📥 Paste Claude Summary", height=150)
-    if st.button("🧠 Run Claude Tone Analysis"):
-        tone = detect_tone(claude_input)
-        st.success(f"Claude Tone: {tone}")
+        csv_output = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📤 Download Updated CSV", csv_output, file_name="scored_trades.csv", mime="text/csv")
 
-    if gpt_input and claude_input:
-        gpt_summary = generate_gpt_summary(gpt_input)
-        verdict_result, gpt_t, claude_t = verdict(gpt_summary, claude_input)
-        st.markdown("---")
-        st.subheader("🧠 GPT vs Claude Verdict")
-        st.write(f"**GPT Tone:** {gpt_t}")
-        st.write(f"**Claude Tone:** {claude_t}")
-        st.success("✅ Verdict: ALIGNED") if verdict_result else st.error("❌ Verdict: MISMATCH")
-
-elif page == "📡 Trend Scanner":
-    st.title("📡 Sentiment Trend Scanner")
-    ticker = st.text_input("Enter Ticker Symbol")
-    if ticker:
-        score = gemini_sentiment_fusion(ticker.upper())
-        st.info(f"📊 Sentiment Fusion Score for {ticker.upper()}: {score}")
-
-elif page == "📘 Strategy Replay":
-    st.title("📘 Strategy Replay: Backtest a Trade")
-    past_trade = st.text_area("📥 Paste Historical Trade Notes", height=200)
-    if st.button("🎞️ Simulate Summary"):
-        result = simulate_trade_summary(past_trade)
-        st.subheader("📈 Replay Summary")
-        st.write(result)
-
-elif page == "🧠 Verdict Hub":
-    st.title("🧠 Final Summary Comparator")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        gpt_block = st.text_area("Paste GPT-4 Summary", height=200)
-    with col2:
-        claude_block = st.text_area("Paste Claude Summary", height=200)
-    with col3:
-        gemini_score = st.text_input("Gemini Fusion Score")
-
-    if st.button("🔎 Compare All"):
-        tone_gpt = detect_tone(gpt_block)
-        tone_claude = detect_tone(claude_block)
-        match = tone_gpt == tone_claude
-        st.subheader("🧠 Tone Verdict")
-        st.write(f"**GPT Tone:** {tone_gpt}")
-        st.write(f"**Claude Tone:** {tone_claude}")
-        st.write(f"**Gemini Fusion Score:** {gemini_score}")
-        st.success("✅ All LLMs Aligned") if match else st.warning("⚠️ Tones Diverge – Use Caution")
+st.sidebar.title("🔧 Toolset Navigation")
+st.sidebar.info("Integrated Twitter API sentiment + trade scoring engine based on GPT, Claude, and real-time Twitter mentions.")
+st.sidebar.markdown("---")
+st.sidebar.success("✅ Ready for backtesting or execution queue")
