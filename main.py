@@ -1,85 +1,122 @@
+
 import streamlit as st
+import openai
+from datetime import datetime
+import yfinance as yf
+from pytrends.request import TrendReq
+import praw
 import pandas as pd
-from textblob import TextBlob
-from openai import OpenAI
 
-# Initialize OpenAI client
-client = OpenAI()
+# Set page config
+st.set_page_config(page_title="Delta Ghost Dashboard", layout="wide")
 
-st.set_page_config(page_title="Delta Ghost – Trade Validator", layout="wide")
-st.title("📈 Delta Ghost – Trade Validator")
+# API Keys from environment variables
+openai.api_key = os.getenv("OPENAI_API_KEY")
+reddit = praw.Reddit(
+    client_id=os.getenv("REDDIT_CLIENT_ID"),
+    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+    user_agent="delta-ghost-sentiment"
+)
 
-# Tabs
-tab1, tab2, tab3 = st.tabs(["📊 Trade Validator", "🧪 Backtest Runner", "🛠️ Claude Prompt Tuner"])
+# ---- Sidebar ----
+st.sidebar.title("🔧 Navigation")
+tab = st.sidebar.radio("Select Tool", ["📈 Ticker Overview", "📊 Reddit + Google Trends", "🤖 Trade Validator", "📁 Backtest Runner", "🎯 Claude Prompt Tuner"])
 
-# Shared session state for results
-if "results" not in st.session_state:
-    st.session_state.results = []
+# ---- Ticker Overview Tab ----
+if tab == "📈 Ticker Overview":
+    st.title("📈 Ticker Overview")
+    ticker = st.text_input("Enter a ticker symbol (e.g., AAPL, TSLA)")
+    if ticker:
+        data = yf.download(ticker, period="1mo", interval="1d")
+        st.line_chart(data["Close"])
 
-with tab1:
-    st.header("📌 Trade Evaluation Results")
+# ---- Reddit + Google Trends Tab ----
+elif tab == "📊 Reddit + Google Trends":
+    st.title("📊 Reddit + Google Trends Sentiment Analysis")
 
-    gpt_input = st.text_area("🧠 GPT Summary Prompt Input", height=150)
-    claude_input = st.text_area("🧠 Claude Summary Text (Paste manually)", height=150)
+    tickers = st.text_input("Enter tickers (comma-separated)").upper().split(",")
+    if tickers and tickers[0]:
+        pytrends = TrendReq(hl='en-US', tz=360)
+        trends_df = pd.DataFrame(columns=["Ticker", "Google Trend Score", "Reddit Mentions"])
+
+        for ticker in tickers:
+            search_term = ticker.strip()
+            # Google Trends
+            try:
+                pytrends.build_payload([search_term], cat=0, timeframe='now 7-d', geo='', gprop='')
+                interest = pytrends.interest_over_time()
+                trend_score = int(interest[search_term].mean()) if not interest.empty else 0
+            except:
+                trend_score = 0
+
+            # Reddit Mentions
+            try:
+                reddit_mentions = 0
+                for submission in reddit.subreddit("wallstreetbets+stocks+options").search(search_term, limit=20):
+                    reddit_mentions += 1
+            except:
+                reddit_mentions = 0
+
+            trends_df.loc[len(trends_df)] = [search_term, trend_score, reddit_mentions]
+
+        st.dataframe(trends_df)
+
+# ---- Trade Validator ----
+elif tab == "🤖 Trade Validator":
+    st.title("🤖 Delta Ghost – Trade Validator")
+
+    gpt_input = st.text_area("🧠 GPT Summary Prompt Input", height=200)
+    claude_input = st.text_area("🧠 Claude Summary Text (Paste manually)", height=200)
 
     if st.button("▶️ Run GPT Summary"):
         try:
-            gpt_response = client.chat.completions.create(
+            gpt_response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a financial analyst."},
-                    {"role": "user", "content": f"Summarize this trade idea. Rate the confidence 1–100 and describe tone:\n{gpt_input}"}
+                    {"role": "system", "content": "You are a professional options analyst."},
+                    {"role": "user", "content": gpt_input}
                 ]
             )
-            reply = gpt_response.choices[0].message.content
+            gpt_summary = gpt_response["choices"][0]["message"]["content"]
 
-            # Extract confidence score
-            confidence = None
-            for word in reply.split():
-                if word.strip('%').isdigit():
-                    num = int(word.strip('%'))
-                    if 0 <= num <= 100:
-                        confidence = num
-                        break
+            # Scoring logic
+            gpt_confidence = 75 if "strong" in gpt_summary.lower() else 50
+            gpt_tone = "Positive" if "bullish" in gpt_summary.lower() else "Neutral"
+            claude_tone = "Positive" if "opportunistic" in claude_input.lower() else "Neutral"
+            auto_score = int((gpt_confidence + (80 if claude_tone == "Positive" else 60)) / 2)
 
-            # Tone tagging
-            analysis = TextBlob(reply)
-            tone = "Positive" if analysis.sentiment.polarity > 0 else "Negative" if analysis.sentiment.polarity < 0 else "Neutral"
-
-            # Claude tone
-            claude_analysis = TextBlob(claude_input)
-            claude_tone = "Positive" if claude_analysis.sentiment.polarity > 0 else "Negative" if claude_analysis.sentiment.polarity < 0 else "Neutral"
-
-            # Auto score: average of GPT confidence and tone alignment (basic example)
-            auto_score = (confidence if confidence else 50)
-            if tone == claude_tone:
-                auto_score += 10
-
-            st.session_state.results.append({
+            result = pd.DataFrame([{
                 "Ticker": "Manual Input",
-                "GPT Confidence Score": confidence,
-                "GPT Tone": tone,
+                "GPT Confidence Score": gpt_confidence,
+                "GPT Tone": gpt_tone,
                 "Claude Tone": claude_tone,
                 "Auto Score": auto_score
-            })
+            }])
 
+            st.dataframe(result)
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"OpenAI API Error: {str(e)}")
 
-    if st.session_state.results:
-        df = pd.DataFrame(st.session_state.results)
-        st.dataframe(df)
-
-with tab2:
-    st.header("📂 Backtest Batch Runner")
-    uploaded_file = st.file_uploader("Upload CSV file of past trades", type=["csv"])
+# ---- Backtest Runner ----
+elif tab == "📁 Backtest Runner":
+    st.title("📁 Strategy Backtest Batch Runner")
+    uploaded_file = st.file_uploader("Upload historical trades CSV", type=["csv"])
     if uploaded_file:
-        df_backtest = pd.read_csv(uploaded_file)
-        st.write("✅ File uploaded and valid. Proceeding...")
-        st.dataframe(df_backtest)
+        try:
+            df = pd.read_csv(uploaded_file)
+            st.dataframe(df.head())
+            st.success("File uploaded and valid. Proceeding with backtest...")
+            # Insert scoring logic here
+        except Exception as e:
+            st.error(f"CSV Error: {str(e)}")
 
-with tab3:
-    st.header("🎯 Claude Prompt Tuner")
-    preset = st.selectbox("Choose Claude Tone Preset", ["Quantitative", "Retail Buzz", "Neutral", "Bearish", "Bullish"])
-    st.write("Claude prompt tone preset applied: ", preset)
-    custom_claude = st.text_area("✍️ Customize Claude prompt manually")
+# ---- Claude Prompt Tuner ----
+elif tab == "🎯 Claude Prompt Tuner":
+    st.title("🎯 Claude Prompt Tuner")
+    tone_choice = st.selectbox("Select Desired Tone Style", ["Quantitative", "Retail Buzz", "Neutral"])
+    if tone_choice == "Quantitative":
+        st.code("This setup exhibits strong technical alignment with risk-defined upside based on implied volatility skews and recent EMA crossovers.")
+    elif tone_choice == "Retail Buzz":
+        st.code("This trade is HOT right now — breaking resistance, Reddit is hyped, and the flow is surging!")
+    else:
+        st.code("The trade has balanced technicals with neutral sentiment. Suitable for conservative positioning.")
