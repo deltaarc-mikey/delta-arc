@@ -1,6 +1,7 @@
 
 import streamlit as st
 import openai
+import os
 from datetime import datetime
 import yfinance as yf
 from pytrends.request import TrendReq
